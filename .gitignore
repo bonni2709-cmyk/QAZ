@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+*.iml
+.idea/
+.vscode/
+local.properties
+*.keystore
+*.jks
+target/android-artifacts/
+.DS_Store

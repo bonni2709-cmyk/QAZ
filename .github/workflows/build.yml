@@ -1,0 +1,168 @@
+name: build
+
+# CI for RAILGUN PURSUIT 3D.
+#   desktop-check : cargo check / test / clippy (advisory) on stable, plus a release build
+#   android       : cross-compile check for the three Android ABIs Infinix Note 30 needs
+#   apk           : MANUAL (workflow_dispatch) — builds a signed-debug APK via cargo-quad-apk
+#
+# No crates.io mirror is required on the runner; GitHub-hosted runners reach crates.io fine.
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  desktop-check:
+    name: desktop (check / test / release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: System libraries (macroquad/miniquad linux deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libx11-dev libxi-dev libgl1-mesa-dev \
+            libegl1-mesa-dev libxcursor-dev libxrandr-dev pkg-config
+
+      - name: cargo fmt --check (advisory)
+        run: cargo fmt --check
+        continue-on-error: true
+
+      - name: cargo clippy (advisory)
+        run: cargo clippy --all-targets
+        continue-on-error: true
+
+      - name: cargo check
+        run: cargo check --all-targets
+
+      - name: cargo test
+        run: cargo test
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      - name: Upload desktop binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: railgun-pursuit-3d-linux-x86_64
+          path: target/release/railgun-pursuit-3d
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    name: android (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-linux-android      # Infinix Note 30 (arm64-v8a) — primary
+          - armv7-linux-androideabi    # 32-bit ARM fallback
+          - x86_64-linux-android       # emulator / ChromeOS
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Locate Android NDK (preinstalled on GitHub runners)
+        id: ndk
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK_HOME="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-}}"
+          if [ -z "${NDK_HOME}" ]; then
+            NDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}/ndk"
+            NDK_HOME="${NDK_ROOT}/$(ls "${NDK_ROOT}" | sort -V | tail -1)"
+          fi
+          echo "NDK_HOME=${NDK_HOME}"
+          echo "home=${NDK_HOME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure NDK clang linker
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.target }}" in
+            aarch64-linux-android)   CLANG=aarch64-linux-android26-clang ;;
+            armv7-linux-androideabi) CLANG=armv7a-linux-androideabi26-clang ;;
+            x86_64-linux-android)    CLANG=x86_64-linux-android26-clang ;;
+            *) echo "unsupported target" >&2; exit 1 ;;
+          esac
+          LINKER="${{ steps.ndk.outputs.home }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${CLANG}"
+          test -x "${LINKER}"
+          ENV_NAME="CARGO_TARGET_$(echo "${{ matrix.target }}" | tr 'a-z-' 'A-Z_')_LINKER"
+          echo "${ENV_NAME}=${LINKER}" >> "${GITHUB_ENV}"
+          echo "Using ${LINKER}"
+
+      - name: cargo check --target ${{ matrix.target }}
+        run: cargo check --release --target ${{ matrix.target }} --all-targets
+
+      - name: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload android artifact
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: railgun-pursuit-3d-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/railgun-pursuit-3d*
+          if-no-files-found: warn
+          retention-days: 14
+
+  apk:
+    name: apk (manual, cargo-quad-apk)
+    needs: [desktop-check, android]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: apk
+
+      - name: Install cargo-quad-apk
+        run: cargo install cargo-quad-apk --locked
+
+      - name: Build debug APK (signed with default debug keystore)
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: cargo quad-apk build --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: railgun-pursuit-3d-apk
+          path: target/android-artifacts/release/apk/*.apk
+          if-no-files-found: error
+          retention-days: 30

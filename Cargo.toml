@@ -1,0 +1,45 @@
+[package]
+name = "railgun-pursuit-3d"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["Railgun Pursuit Team"]
+description = "RAILGUN PURSUIT 3D — hardcore 3D run-and-gun & survival on a war rig. Rust + Macroquad (3D). Android-first, target hardware: Infinix Note 30 (Helio G99 / Mali-G57, 8 GB RAM)."
+license = "MIT"
+keywords = ["game", "3d", "macroquad", "android", "survival"]
+categories = ["games"]
+publish = false
+
+[dependencies]
+macroquad = "0.4.14"
+# JSON saves / config land in Module 6; wired now so Cargo.lock covers them.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ---------------------------------------------------------------------------
+# Android packaging metadata (cargo-quad-apk, see .github/workflows/build.yml)
+# ---------------------------------------------------------------------------
+[package.metadata.android]
+assets = "assets/"
+version_code = 1
+version_name = "0.1.0-module1"
+build_targets = [
+    "armv7-linux-androideabi",
+    "aarch64-linux-android",
+    "x86_64-linux-android",
+]
+
+[package.metadata.android.activity_attributes]
+"android:exported" = "true"              # required for targetSdk >= 31
+"android:screenOrientation" = "userLandscape"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false
+
+[profile.dev]
+opt-level = 1                 # macroquad is unusable unoptimised in dev builds
