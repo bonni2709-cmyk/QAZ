@@ -55,8 +55,15 @@ pub struct Truck {
     pub max_health: f32,
     pub fuel: f32,
     pub max_fuel: f32,
+    /// Flat damage resist from armor ranks, 0.0..0.6 (set by the driving state).
+    pub damage_reduction: f32,
+    /// Top-speed multiplier from engine ranks (1.0 + rank * 0.10).
+    pub top_speed_mult: f32,
+    /// Acceleration multiplier from engine ranks (1.0 + rank * 0.12).
+    pub acceleration_mult: f32,
     wheel_spin: f32,
     turret_yaw: f32,
+    hull_bonus: f32,
 
     body: PartMesh,
     turret: PartMesh,
@@ -77,8 +84,12 @@ impl Truck {
             max_health: 100.0,
             fuel: 100.0,
             max_fuel: 100.0,
+            damage_reduction: 0.0,
+            top_speed_mult: 1.0,
+            acceleration_mult: 1.0,
             wheel_spin: 0.0,
             turret_yaw: 0.0,
+            hull_bonus: 0.0,
             body,
             turret,
             wheel,
@@ -120,9 +131,21 @@ impl Truck {
         (muzzle, dir)
     }
 
+    /// Re-derive max hull from the armor track. Buying ranks mid-run
+    /// patches the rig by the delta (a fresh plate on the bed, fresh blood in it).
+    pub fn set_hull_bonus(&mut self, bonus: f32) {
+        let delta = bonus - self.hull_bonus;
+        self.hull_bonus = bonus;
+        self.max_health = 100.0 + bonus;
+        if delta != 0.0 {
+            self.health = (self.health + delta).clamp(0.0, self.max_health);
+        }
+    }
+
     /// Apply damage to the hull (fires the health bar; 0 = wrecked).
     pub fn apply_damage(&mut self, damage: f32) {
-        self.health = (self.health - damage).max(0.0);
+        let resisted = damage * (1.0 - self.damage_reduction.clamp(0.0, 0.6));
+        self.health = (self.health - resisted).max(0.0);
     }
 
     /// Truck velocity vector (used for rocket lead prediction).
@@ -388,7 +411,7 @@ impl Truck {
         self.fuel = (self.fuel - burn * dt).max(0.0);
 
         let engine = if self.fuel > 0.0 {
-            throttle * ENGINE_POWER
+            throttle * ENGINE_POWER * self.acceleration_mult
         } else {
             0.0
         };
@@ -399,7 +422,7 @@ impl Truck {
         if offroad {
             self.speed -= self.speed * 1.35 * dt;
         }
-        self.speed = self.speed.clamp(-MAX_REVERSE, MAX_SPEED);
+        self.speed = self.speed.clamp(-MAX_REVERSE, MAX_SPEED * self.top_speed_mult);
         if self.speed.abs() < 0.02 && throttle == 0.0 {
             self.speed = 0.0;
         }

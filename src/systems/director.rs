@@ -7,6 +7,7 @@
 use macroquad::prelude::*;
 
 use crate::entities::enemies::{EnemyKind, EnemyPool};
+use crate::systems::loot::{LootKind, LootPool};
 use crate::world::road::ROAD_HALF;
 
 const GRACE_PERIOD_S: f32 = 6.0;
@@ -14,6 +15,7 @@ const GRACE_PERIOD_S: f32 = 6.0;
 pub struct Director {
     rng: u64,
     spawn_timer: f32,
+    loot_timer: f32,
     grace: f32,
 }
 
@@ -24,6 +26,7 @@ impl Director {
         Director {
             rng: seed | 1,
             spawn_timer: 1.5,
+            loot_timer: 5.0,
             grace: GRACE_PERIOD_S,
         }
     }
@@ -50,11 +53,21 @@ impl Director {
         (2.0 + distance_m / 320.0).min(7.0) as usize
     }
 
-    pub fn update(&mut self, dt: f32, distance_m: f32, truck_z: f32, enemies: &mut EnemyPool) {
+    pub fn update(
+        &mut self,
+        dt: f32,
+        distance_m: f32,
+        truck_z: f32,
+        enemies: &mut EnemyPool,
+        loot: &mut LootPool,
+    ) {
         if self.grace > 0.0 {
             self.grace -= dt;
+            // still seed loot during the grace period so the opener feels generous
+            self.update_loot(dt, truck_z, loot);
             return;
         }
+        self.update_loot(dt, truck_z, loot);
 
         let difficulty = Self::difficulty(distance_m);
         let cap = Self::concurrency_cap(distance_m);
@@ -95,5 +108,40 @@ impl Director {
         };
 
         enemies.spawn(kind, vec3(x, 0.0, z));
+    }
+
+    /// Seed crate clusters on the asphalt/shoulders every 8–13 s.
+    fn update_loot(&mut self, dt: f32, truck_z: f32, loot: &mut LootPool) {
+        self.loot_timer -= dt;
+        if self.loot_timer > 0.0 {
+            return;
+        }
+        self.loot_timer = self.rand_range(8.0, 13.0);
+        let z = truck_z + self.rand_range(85.0, 135.0);
+        let on_road = self.rand01() < 0.78;
+        let x = if on_road {
+            self.rand_range(-ROAD_HALF * 1.35, ROAD_HALF * 1.35)
+        } else {
+            let side = if self.rand01() < 0.5 { -1.0 } else { 1.0 };
+            side * self.rand_range(ROAD_HALF + 1.0, ROAD_HALF + 7.0)
+        };
+        let n = 2 + (self.rand01() * 3.0) as usize; // 2–4 items
+        for i in 0..n {
+            let roll = self.rand01();
+            let kind = if roll < 0.62 {
+                LootKind::Scrap
+            } else if roll < 0.82 {
+                LootKind::Fuel
+            } else {
+                LootKind::Repair
+            };
+            let scrap = if kind == LootKind::Scrap {
+                6 + (self.rand01() * 8.0) as u32
+            } else {
+                0
+            };
+            let ox = if n > 1 { (i as f32 - (n as f32 - 1.0) * 0.5) * 1.4 } else { 0.0 };
+            loot.spawn(kind, vec3(x + ox, 0.4, z + self.rand_range(-2.0, 2.0)), scrap);
+        }
     }
 }

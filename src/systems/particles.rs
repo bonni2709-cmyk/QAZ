@@ -270,6 +270,16 @@ impl ParticlePool {
         );
     }
 
+    /// Bright twinkle when a salvage pickup reaches the rig.
+    pub fn pickup_spark(&mut self, pos: Vec3) {
+        for _ in 0..4 {
+            let dir = self.random_dir();
+            let speed = self.rand_range(2.5, 5.5);
+            let life = self.rand_range(0.18, 0.34);
+            self.spawn(ParticleKind::Spark, pos, dir * speed + vec3(0.0, 2.0, 0.0), life, 0.05, 6.0, false);
+        }
+    }
+
     /// Sustained fire effect for burning enemies (call once per frame per burning enemy).
     pub fn burn_touch(&mut self, pos: Vec3) {
         let ox = self.rand_range(-0.4, 0.4);

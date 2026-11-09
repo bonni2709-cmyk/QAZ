@@ -14,8 +14,10 @@ use crate::entities::projectiles::{ProjKind, ProjOwner, ProjectilePool};
 use crate::entities::truck::Truck;
 use crate::systems::chase::ChaseCamera;
 use crate::systems::director::Director;
+use crate::systems::loot::{LootKind, LootPool};
 use crate::systems::particles::{ParticlePool, TracerPool};
 use crate::systems::turret::{AmmoKind, TurretState};
+use crate::systems::upgrades::UpgradeState;
 use crate::ui::{self, HudData};
 use crate::world::road::{biome_at, draw_world, haze_color, Biome, ROAD_HALF};
 
@@ -31,6 +33,8 @@ pub struct DrivingState {
     tracers: TracerPool,
     turret: TurretState,
     director: Director,
+    loot: LootPool,
+    upgrades: UpgradeState,
     events: EnemyFrameEvents,
     hit_rng: u64,
     time_of_day: f32,
@@ -40,6 +44,8 @@ pub struct DrivingState {
     biome_band: u32,
     banner_timer: f32,
     paused: bool,
+    workbench_open: bool,
+    wb_flash: f32,
     wrecked: bool,
     wreck_boom_done: bool,
     fade_in: f32,
@@ -119,6 +125,24 @@ fn android_fire_touch() -> bool {
     false
 }
 
+/// Android WORKBENCH toggle button (tap = toggle, not hold).
+#[cfg(target_os = "android")]
+fn wb_touched() -> bool {
+    let (cx, cy, r) = crate::ui::wb_button_center();
+    touches().iter().any(|t| {
+        matches!(t.phase, TouchPhase::Started) && {
+            let dx = t.position.x - cx;
+            let dy = t.position.y - cy;
+            dx * dx + dy * dy <= (r + 10.0) * (r + 10.0)
+        }
+    })
+}
+
+#[cfg(not(target_os = "android"))]
+fn wb_touched() -> bool {
+    false
+}
+
 impl DrivingState {
     pub fn new() -> DrivingState {
         DrivingState {
@@ -130,6 +154,8 @@ impl DrivingState {
             tracers: TracerPool::new(),
             turret: TurretState::new(),
             director: Director::new(),
+            loot: LootPool::new(),
+            upgrades: UpgradeState::new(),
             events: EnemyFrameEvents::new(),
             hit_rng: 0xA5A5_5A5A_3C3C_C3C3,
             time_of_day: 0.34, // mid-morning wasteland light
@@ -139,6 +165,8 @@ impl DrivingState {
             biome_band: biome_at(0.0).band_index(),
             banner_timer: 3.2,
             paused: false,
+            workbench_open: false,
+            wb_flash: 0.0,
             wrecked: false,
             wreck_boom_done: false,
             fade_in: 1.0,
@@ -151,8 +179,10 @@ impl DrivingState {
     /// Full run reset (R). Keeps the session best distance.
     fn reset_run(&mut self) {
         let best = self.best_m;
+        let upgrades = self.upgrades.clone(); // session salvage & workbench ranks persist
         *self = DrivingState::new();
         self.best_m = best;
+        self.upgrades = upgrades;
     }
 
     #[inline]
@@ -219,18 +249,47 @@ impl DrivingState {
         self.enemies.deactivate(index);
         self.kills += 1;
         self.kill_timer = 1.0;
+
+        // salvage spills out of the wreck (bikers drop crumbs, armored cars spill loads)
+        let (drops, base) = match kind {
+            EnemyKind::Biker => (1, 6),
+            EnemyKind::Buggy => (2, 5),
+            EnemyKind::Armored => (3, 8),
+        };
+        for _ in 0..drops {
+            let amount = base + (hit_roll(&mut self.hit_rng) * 5.0) as u32;
+            self.loot.spawn_scatter(LootKind::Scrap, pos + vec3(0.0, 0.6, 0.0), amount);
+        }
+        let roll = hit_roll(&mut self.hit_rng);
+        match kind {
+            EnemyKind::Buggy if roll < 0.25 => {
+                self.loot.spawn(LootKind::Fuel, pos + vec3(0.0, 0.8, 0.0), 0);
+            }
+            EnemyKind::Armored if roll < 0.40 => {
+                self.loot.spawn(LootKind::Repair, pos + vec3(0.0, 0.9, 0.0), 0);
+            }
+            _ => {}
+        }
     }
 
     pub fn update(&mut self, dt: f32) {
         let time = get_time() as f32;
 
         // ---------- global keys ----------
+        if (is_key_pressed(KeyCode::Tab) || wb_touched()) && !self.wrecked {
+            self.workbench_open = !self.workbench_open;
+            self.paused = false;
+        }
         #[cfg(target_os = "android")]
-        let pause_toggle = is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back);
+        let escape_pressed = is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back);
         #[cfg(not(target_os = "android"))]
-        let pause_toggle = is_key_pressed(KeyCode::Escape);
-        if pause_toggle && !self.wrecked {
-            self.paused = !self.paused;
+        let escape_pressed = is_key_pressed(KeyCode::Escape);
+        if escape_pressed {
+            if self.workbench_open {
+                self.workbench_open = false;
+            } else if !self.wrecked {
+                self.paused = !self.paused;
+            }
         }
 
         if is_key_pressed(KeyCode::R) {
@@ -238,8 +297,8 @@ impl DrivingState {
             return;
         }
 
-        // cursor grabbing follows pause / wreck state
-        if self.paused || self.wrecked {
+        // cursor grabbing follows pause / wreck / workbench state
+        if self.paused || self.wrecked || self.workbench_open {
             set_cursor_grab(false);
             show_mouse(true);
         } else {
@@ -251,11 +310,26 @@ impl DrivingState {
             return;
         }
 
+        // workbench freezes the world (same contract as the pause menu)
+        if self.workbench_open {
+            self.wb_flash = (self.wb_flash - dt * 1.8).max(0.0);
+            return;
+        }
+
         self.fade_in = (self.fade_in - dt * 1.6).max(0.0);
         self.banner_timer = (self.banner_timer - dt).max(0.0);
         self.hit_timer = (self.hit_timer - dt * 2.6).max(0.0);
         self.kill_timer = (self.kill_timer - dt * 1.8).max(0.0);
         self.time_of_day = (self.time_of_day + dt / DAY_LENGTH_S).rem_euclid(1.0);
+
+        // ---------- apply workbench upgrades ----------
+        self.truck.damage_reduction = self.upgrades.damage_reduction();
+        self.truck.top_speed_mult = self.upgrades.top_speed_mult();
+        self.truck.acceleration_mult = self.upgrades.acceleration_mult();
+        self.truck.set_hull_bonus(self.upgrades.hull_bonus());
+        self.turret.rate_mult = self.upgrades.fire_rate_mult();
+        self.turret.cooling_mult = self.upgrades.cooling_mult();
+        self.turret.heat_mult = self.upgrades.heat_leak_mult();
 
         // ---------- wrecked: the world keeps burning, the run is over ----------
         if self.wrecked {
@@ -379,7 +453,7 @@ impl DrivingState {
         }
 
         // ---------- hostiles ----------
-        self.director.update(dt, self.distance_m, self.truck.position.z, &mut self.enemies);
+        self.director.update(dt, self.distance_m, self.truck.position.z, &mut self.enemies, &mut self.loot);
         self.enemies.update(
             dt,
             self.truck.position,
@@ -545,6 +619,18 @@ impl DrivingState {
             }
         }
 
+        // ---------- salvage: magnet beam ----------
+        let tally = self.loot.update(dt, self.truck.position, self.upgrades.magnet_radius(), &mut self.particles);
+        if tally.any() {
+            self.upgrades.add_scrap(tally.scrap);
+            if tally.repair > 0 {
+                self.truck.health = (self.truck.health + tally.repair as f32 * 18.0).min(self.truck.max_health);
+            }
+            if tally.fuel > 0 {
+                self.truck.fuel = (self.truck.fuel + tally.fuel as f32 * 22.0).min(self.truck.max_fuel);
+            }
+        }
+
         // ---------- hull integrity ----------
         if self.truck.health <= 0.0 {
             self.wrecked = true;
@@ -566,6 +652,7 @@ impl DrivingState {
     }
 
     pub fn draw(&mut self) {
+        let time = get_time() as f32;
         let z = self.truck.position.z;
         let biome = biome_at(z);
         let ambient = self.ambient();
@@ -576,6 +663,12 @@ impl DrivingState {
         set_camera(&self.camera.to_camera3d(speed_norm));
         draw_world(z, ambient);
         self.enemies.draw(ambient);
+        self.loot.draw(ambient, time);
+        // magnet beam: hot filaments from the rig to every attracted pickup
+        let truck_top = self.truck.position + vec3(0.0, 2.6, 0.0);
+        self.loot.for_each_attracted(|lp| {
+            draw_line_3d(truck_top, lp, Color::new(1.0, 0.78, 0.25, 1.0));
+        });
         self.projectiles.draw();
         self.truck.draw(ambient);
         self.particles.draw();
@@ -596,6 +689,7 @@ impl DrivingState {
             offroad: self.truck.position.x.abs() > ROAD_HALF + 0.5,
             low_fuel: self.truck.fuel / self.truck.max_fuel < 0.15,
             kills: self.kills,
+            scrap: self.upgrades.scrap(),
             ammo: self.turret.ammo.label(),
             ammo_short: self.turret.ammo.short(),
             overheated: self.turret.overheated,
@@ -608,11 +702,11 @@ impl DrivingState {
             ui::draw_biome_banner(biome.name(), alpha);
         }
 
-        if self.rocket_warning && !self.wrecked {
+        if self.rocket_warning && !self.wrecked && !self.workbench_open {
             ui::draw_incoming_warning();
         }
 
-        if !self.paused && !self.wrecked {
+        if !self.paused && !self.wrecked && !self.workbench_open {
             ui::draw_crosshair(self.turret.overheated, self.hit_timer, self.kill_timer);
         }
 
@@ -630,8 +724,12 @@ impl DrivingState {
             ui::draw_pause_overlay();
         }
 
+        if self.workbench_open {
+            ui::draw_workbench(&mut self.upgrades, &mut self.wb_flash);
+        }
+
         if self.wrecked {
-            ui::draw_wrecked_overlay(self.distance_m, self.best_m, self.kills);
+            ui::draw_wrecked_overlay(self.distance_m, self.best_m, self.kills, self.upgrades.scrap());
         }
     }
 }

@@ -19,6 +19,7 @@ pub struct HudData<'a> {
     pub ammo: &'a str,
     pub ammo_short: &'a str,
     pub overheated: bool,
+    pub scrap: u32,
 }
 
 #[inline]
@@ -153,6 +154,16 @@ fn draw_run_stats(d: &HudData<'_>, s: f32) {
         15.0 * s,
         Color::new(0.95, 0.55, 0.3, 0.95),
     );
+
+    let scrap = format!("SCRAP  {}", d.scrap);
+    let scrap_dim = measure_text(&scrap, None, (15.0 * s) as u16, 1.0);
+    draw_text(
+        &scrap,
+        sw - 24.0 - scrap_dim.width,
+        cy + 22.0 * s + 36.0 * s,
+        15.0 * s,
+        Color::new(0.98, 0.72, 0.24, 0.95),
+    );
 }
 
 /// Big speedometer bottom-center.
@@ -182,7 +193,7 @@ pub fn draw_hud(d: &HudData<'_>) {
     // control hints (desktop only; Android renders touch zones instead)
     #[cfg(not(target_os = "android"))]
     draw_text(
-        "W/S GAS·BRAKE   A/D STEER   LMB FIRE   1/2 AMMO   R RESET   ESC PAUSE",
+        "W/S GAS·BRAKE   A/D STEER   LMB FIRE   1/2 AMMO   R RESET   TAB WORKBENCH   ESC PAUSE",
         18.0,
         screen_height() - 10.0,
         14.0,
@@ -237,6 +248,12 @@ fn draw_touch_zones() {
     draw_circle_lines(fx, fy, 56.0, 3.0, Color::new(1.0, 0.42, 0.22, 0.75));
     let fire_dim = measure_text("FIRE", None, 22, 1.0);
     draw_text("FIRE", fx - fire_dim.width * 0.5, fy + 8.0, 22.0, Color::new(1.0, 0.75, 0.6, 0.95));
+    // WORKBENCH button (top-left, below the gauges)
+    let (wb_x, wb_y, wb_r) = wb_button_center();
+    draw_circle(wb_x, wb_y, wb_r, Color::new(0.55, 0.4, 0.12, 0.4));
+    draw_circle_lines(wb_x, wb_y, wb_r, 3.0, Color::new(1.0, 0.72, 0.28, 0.8));
+    let wb_dim = measure_text("WB", None, 22, 1.0);
+    draw_text("WB", wb_x - wb_dim.width * 0.5, wb_y + 7.0, 22.0, Color::new(1.0, 0.82, 0.45, 0.95));
     // auto-gas note
     let note = "AUTO-GAS ENGAGED";
     let dim = measure_text(note, None, 13, 1.0);
@@ -307,8 +324,9 @@ pub fn draw_pause_overlay() {
         "ESC / BACK — RESUME",
         "R — RESTART RUN",
         "1 / 2 — SWAP AMMO (AP / INCENDIARY)",
+        "TAB — WHEELED WORKBENCH (upgrades)",
         "",
-        "MODULE 2 · COMBAT & HOSTILE MACHINES",
+        "MODULE 3 · SALVAGE & WORKBENCH",
     ];
     let mut y = sh * 0.50;
     for line in lines {
@@ -336,6 +354,12 @@ pub fn draw_pause_overlay() {
 #[cfg(target_os = "android")]
 pub fn fire_button_center() -> (f32, f32, f32) {
     (screen_width() - 84.0, screen_height() * 0.44, 56.0)
+}
+
+/// Android WORKBENCH button geometry (hit-tested in the driving state).
+#[cfg(target_os = "android")]
+pub fn wb_button_center() -> (f32, f32, f32) {
+    (96.0, 196.0, 34.0)
 }
 
 /// Center crosshair + hit / kill markers.
@@ -422,7 +446,7 @@ pub fn draw_incoming_warning() {
 }
 
 /// Wrecked overlay — run over, statistics, restart prompt.
-pub fn draw_wrecked_overlay(distance_m: f32, best_m: f32, kills: u32) {
+pub fn draw_wrecked_overlay(distance_m: f32, best_m: f32, kills: u32, scrap: u32) {
     let sw = screen_width();
     let sh = screen_height();
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.12, 0.02, 0.01, 0.55));
@@ -437,12 +461,13 @@ pub fn draw_wrecked_overlay(distance_m: f32, best_m: f32, kills: u32) {
     let stat1 = format!("DISTANCE   {} m", distance_m as u32);
     let stat2 = format!("BEST       {} m", best_m as u32);
     let stat3 = format!("KILLS      {}", kills);
-    for (i, stat) in [stat1, stat2, stat3].iter().enumerate() {
+    let stat4 = format!("SCRAP BANK {}", scrap);
+    for (i, stat) in [stat1, stat2, stat3, stat4].iter().enumerate() {
         let dim = measure_text(stat, None, 26, 1.0);
         draw_text(
             stat,
             (sw - dim.width) * 0.5,
-            sh * 0.52 + i as f32 * 36.0,
+            sh * 0.46 + i as f32 * 34.0,
             26.0,
             Color::new(0.93, 0.88, 0.75, 1.0),
         );

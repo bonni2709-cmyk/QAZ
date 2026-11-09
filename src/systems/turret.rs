@@ -82,6 +82,10 @@ pub struct TurretState {
     pub heat: f32,
     pub overheated: bool,
     pub ammo: AmmoKind,
+    /// Fire-rate / cooling multipliers from the workbench AUTOLOADER track.
+    pub rate_mult: f32,
+    pub cooling_mult: f32,
+    pub heat_mult: f32,
     cooldown: f32,
 }
 
@@ -92,6 +96,9 @@ impl TurretState {
             heat: 0.0,
             overheated: false,
             ammo: AmmoKind::Ap,
+            rate_mult: 1.0,
+            cooling_mult: 1.0,
+            heat_mult: 1.0,
             cooldown: 0.0,
         }
     }
@@ -134,7 +141,11 @@ impl TurretState {
     pub fn update(&mut self, dt: f32) {
         self.cooldown = (self.cooldown - dt).max(0.0);
         // heat always bleeds; the lockout needs a real cooldown to clear
-        let cool_rate = if self.overheated { COOL_PER_SEC * 1.25 } else { COOL_PER_SEC };
+        let cool_rate = if self.overheated {
+            COOL_PER_SEC * 1.25 * self.cooling_mult
+        } else {
+            COOL_PER_SEC * self.cooling_mult
+        };
         self.heat = (self.heat - cool_rate * dt).max(0.0);
         if self.overheated && self.heat <= OVERHEAT_UNLOCK {
             self.overheated = false;
@@ -147,8 +158,8 @@ impl TurretState {
         if self.overheated || self.cooldown > 0.0 {
             return false;
         }
-        self.heat = (self.heat + self.ammo.heat_per_shot()).min(1.05);
-        self.cooldown = SHOT_INTERVAL;
+        self.heat = (self.heat + self.ammo.heat_per_shot() * self.heat_mult).min(1.05);
+        self.cooldown = SHOT_INTERVAL / self.rate_mult;
         if self.heat >= 1.0 {
             self.overheated = true;
         }

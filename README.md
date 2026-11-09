@@ -20,7 +20,7 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 |---|--------|--------|
 | 1 | 3D core & transport (truck, procedural road, biomes, chase cam, HUD, loading) | **DONE — this branch** |
 | 2 | Combat: 360° turret, overheating, AP/incendiary ammo, bikers/buggies/armored cars, tracers, 3D-part debris | **DONE — this branch** |
-| 3 | Looting on the move (magnet beam, wheeled workbench, turret/armor/engine upgrades) | planned |
+| 3 | Looting on the move (magnet beam, wheeled workbench, turret/armor/engine upgrades) | **DONE — this branch** |
 | 4 | Weather & lighting (day/night done early, sandstorms), Boss #1: tanker truck | planned |
 | 5 | Heavy assets: 4K textures, WAV audio, 5-min track, multi-arch CI polish | planned |
 | 6 | UI/menus, JSON saves, APK packaging, icon | planned |
@@ -84,6 +84,30 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 - **HUD**: ammo chips, KILLS counter, hit / kill markers, INCOMING warning
   when a rocket is inbound, OVERHEATED flash, FIRE button on Android.
 
+## Module 3 — what's inside
+
+- **Salvage drops on kill**: enemy wrecks spill scrap crates with a toss
+  (biker 6–10, buggy 5–10 ×2, armored car 8–13 ×3) — +25 % buggy chance to
+  drop fuel, +40 % armored-car chance to drop a medkit.
+- **Crate clusters seeded by the wave director** every 8–13 s ahead of the rig
+  (≈78 % on the asphalt, rest on the shoulder): scrap / fuel cans / medkits.
+- **Magnet beam** (always on): anything within beam radius is reeled into the
+  rig at up to 24 m/s and consumed on contact (+18 HULL per medkit, +22 FUEL
+  per can); magnetised pickups draw a hot filament from the truck to themselves.
+- **Wheeled Workbench** (`TAB`, Android `WB` button; world pauses while
+  open): the bed-mounted upgrade bench with four tracks, 3 ranks each:
+  - **COMPOSITE PLATING** — +25 max HULL and 6 % flat damage resist per rank
+    (buying ranks mid-run patches the rig by the delta);
+  - **AUTOLOADER & COOLING** — +9 % fire rate, +18 % cooling per rank;
+  - **BIG-BLOCK ENGINE** — +10 % top speed, +12 % acceleration per rank;
+  - **SALVAGE MAGNET** — +2.4 m beam radius per rank (6 m base → 13.2 m max).
+- **Economy**: scrap persists for the session (runs you wreck out of still
+  keep it); JSON saves arrive in Module 6. HUD tracks the bank next to KILLS;
+  wreck screen shows distance/best/kills/scrap bank.
+- **UI**: workbench panel with rank pips, FIT buttons, insufficient-funds
+  dimming, purchase flash; desktop + Android hit-testing (touches simulate
+  mouse).
+
 ## Controls
 
 | Desktop | Android |
@@ -92,6 +116,7 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 | `A` `D` / `←` `→` steer | — |
 | Mouse aims turret · `LMB` / `Space` fire | auto-aim + FIRE button |
 | `1` / `2` / `Q` ammo (AP / incendiary / cycle) | tap chips (planned UI) / `Q` equivalent |
+| `TAB` wheeled workbench (buy upgrades) | `WB` button |
 | `R` reset run | same via pause overlay |
 | `Esc` pause | Android back button / pause |
 | hold `Space` / click on loading = fast-forward | tap & hold anywhere |
@@ -139,9 +164,12 @@ src/
     chase.rs            — chase camera (+ impact shake)
     particles.rs        — pooled fire/smoke/sparks/debris/tracers
     turret.rs           — 360° turret controller, heat model, ammo
-    director.rs         — wave director (difficulty curve)
+    director.rs         — wave director (difficulty curve + crate seeding)
+    loot.rs             — pooled salvage pickups, magnet beam pull, beacons
+    upgrades.rs         — scrap economy, 4 workbench tracks (3 ranks each)
   ui/
     hud.rs              — bars, speedometer, banners, letterbox/vignette
+    workbench.rs        — wheeled-workbench upgrade panel (TAB/WB)
 assets/                 — textures/ audio/ models/ music/ (Module 5)
 .github/workflows/      — desktop + Android ABI CI, manual APK job
 ```
