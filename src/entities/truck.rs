@@ -415,9 +415,7 @@ impl Truck {
         self.position += forward * self.speed * dt;
 
         self.wheel_spin += self.speed * dt / WHEEL_RADIUS;
-        // turret idles in a slow defensive sweep until Module 2 gives manual fire
-        self.turret_yaw = (now * 0.45).sin() * 0.85;
-        self.turret_heat = (self.turret_heat - 0.22 * dt).max(0.0);
+        // turret yaw is driven externally by the turret controller (set_turret_yaw)
     }
 
     /// Render. `ambient` ∈ [0, 1.05] from the day/night cycle.

@@ -189,7 +189,6 @@ impl Enemy {
 }
 
 const POOL_CAPACITY: usize = 32;
-const TRUCK_RADIUS: f32 = 1.95;
 
 pub struct EnemyPool {
     items: Vec<Enemy>,
