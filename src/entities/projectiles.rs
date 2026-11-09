@@ -122,10 +122,8 @@ impl ProjectilePool {
             .map(|p| p.pos)
     }
 
-    /// Integrate the pool. Returns the number of *enemy* rockets still in flight
-    /// after the update (used by the HUD INCOMING warning).
-    pub fn update(&mut self, dt: f32) -> usize {
-        let mut rockets_flying = 0usize;
+    /// Integrate the pool.
+    pub fn update(&mut self, dt: f32) {
         for p in self.items.iter_mut() {
             if !p.active {
                 continue;
@@ -136,13 +134,8 @@ impl ProjectilePool {
             p.life -= dt;
             if p.life <= 0.0 {
                 p.active = false;
-                continue;
-            }
-            if p.kind == ProjKind::Rocket && p.owner == ProjOwner::Enemy {
-                rockets_flying += 1;
             }
         }
-        rockets_flying
     }
 
     pub fn any_enemy_rocket_near(&self, truck_pos: Vec3, radius: f32) -> bool {

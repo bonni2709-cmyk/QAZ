@@ -225,13 +225,10 @@ impl DrivingState {
         let time = get_time() as f32;
 
         // ---------- global keys ----------
-        let mut pause_toggle = is_key_pressed(KeyCode::Escape);
         #[cfg(target_os = "android")]
-        {
-            if is_key_pressed(KeyCode::Back) {
-                pause_toggle = true;
-            }
-        }
+        let pause_toggle = is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back);
+        #[cfg(not(target_os = "android"))]
+        let pause_toggle = is_key_pressed(KeyCode::Escape);
         if pause_toggle && !self.wrecked {
             self.paused = !self.paused;
         }

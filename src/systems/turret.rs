@@ -97,12 +97,14 @@ impl TurretState {
     }
 
     /// Mouse-look delta applied to the turret (desktop).
+    #[cfg(not(target_os = "android"))]
     pub fn add_aim(&mut self, dx_pixels: f32) {
         self.yaw += dx_pixels * 0.0031;
     }
 
     /// Rotate the turret directly toward an absolute world yaw (Android auto-aim).
     /// Turns at `rate` rad/s. `world_yaw` = truck yaw + desired relative.
+    #[cfg(target_os = "android")]
     pub fn track(&mut self, target_world_yaw: f32, truck_yaw: f32, dt: f32) {
         const RATE: f32 = 3.4;
         let desired = target_world_yaw - truck_yaw;
