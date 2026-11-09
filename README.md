@@ -19,7 +19,7 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 | # | Module | Status |
 |---|--------|--------|
 | 1 | 3D core & transport (truck, procedural road, biomes, chase cam, HUD, loading) | **DONE — this branch** |
-| 2 | Combat: 360° turret, overheating, AP/incendiary ammo, bikers/buggies/armored cars, tracers, 3D-part debris | next |
+| 2 | Combat: 360° turret, overheating, AP/incendiary ammo, bikers/buggies/armored cars, tracers, 3D-part debris | **DONE — this branch** |
 | 3 | Looting on the move (magnet beam, wheeled workbench, turret/armor/engine upgrades) | planned |
 | 4 | Weather & lighting (day/night done early, sandstorms), Boss #1: tanker truck | planned |
 | 5 | Heavy assets: 4K textures, WAV audio, 5-min track, multi-arch CI polish | planned |
@@ -54,12 +54,44 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
   rendering (parts re-bake into reused vertex buffers), deterministic world
   (stable across sessions), unit tests for the PRNG/biome bands.
 
+## Module 2 — what's inside
+
+- **360° manual turret** (mouse-look on desktop, auto-aim with target lead on
+  Android): hold LMB / Space to fire, ~8.7 rds/s, 360° free traverse.
+- **Heat model**: sustained fire walks the barrel into an overheat lockout
+  (unlocks at 35 %); incendiary runs cooler than AP.
+- **Two ammo types** (`1` / `2` / `Q`): Tungsten AP (flat 34 dmg, ignores
+  armor, 30 % ricochet off armored cars) and Incendiary (24 dmg vs
+  unarmored / 14 vs armored, +9 dps burn for 3 s).
+- **Three enemy machines**, each with its own low-poly model and AI:
+  - **Raider Biker** — 27.5 m/s, weaves on a sine through traffic, SMG on a
+    cooldown with range-falloff hit probability, rams at close range;
+  - **Junker Buggy** — lateral jerks + periodic ballistic jump, rams and
+    damages itself doing it;
+  - **Armored Car** — holds ~50 m stand-off, lazy sidestep, fires unguided
+    rockets with partial target lead on a telegraphed cooldown (muzzle glow
+    0.65 s before launch); armored — AP's prey.
+- **Wave director** — difficulty scales with distance (0.9 → 2.8), concurrency
+  cap grows 2 → 7, spawn mix shifts from bikers to armored cars past 250 m,
+  6 s spawn grace at run start, occasional biker rear-ambushes.
+- **Effects** — pooled particles: explosion fireballs, smoke rings, spark
+  bursts, bouncing 3D debris, muzzle flashes, rocket smoke breadcrumbs,
+  burn-DoT flames; hitscan tracers for the SMG; flat bullet tracers (AP
+  yellow / incendiary orange).
+- **Hull damage & wreck**: enemy SMG / rams / rockets chew the HULL bar;
+  at 0 the rig is **WRECKED** — big explosion, run summary (distance/best/
+  kills), `R` rolls out again. Nearby rockets shake the camera.
+- **HUD**: ammo chips, KILLS counter, hit / kill markers, INCOMING warning
+  when a rocket is inbound, OVERHEATED flash, FIRE button on Android.
+
 ## Controls
 
 | Desktop | Android |
 |---------|---------|
 | `W` / `↑` gas · `S` / `↓` brake/reverse | AUTO-GAS throttle · hold left/right screen thirds to steer |
 | `A` `D` / `←` `→` steer | — |
+| Mouse aims turret · `LMB` / `Space` fire | auto-aim + FIRE button |
+| `1` / `2` / `Q` ammo (AP / incendiary / cycle) | tap chips (planned UI) / `Q` equivalent |
 | `R` reset run | same via pause overlay |
 | `Esc` pause | Android back button / pause |
 | hold `Space` / click on loading = fast-forward | tap & hold anywhere |
@@ -98,11 +130,16 @@ src/
     driving.rs          — the endless-highway run
   entities/
     truck.rs            — the war rig (build, physics, draw)
+    projectiles.rs      — pooled AP/incendiary/rockets (zero alloc)
+    enemies.rs          — biker / buggy / armored car + pooled AI
   world/
     road.rs             — procedural chunks, biomes, deterministic PRNG
   systems/
     meshkit.rs          — rotated-part mesh kit (macroquad primitives are axis-aligned!)
-    chase.rs            — chase camera
+    chase.rs            — chase camera (+ impact shake)
+    particles.rs        — pooled fire/smoke/sparks/debris/tracers
+    turret.rs           — 360° turret controller, heat model, ammo
+    director.rs         — wave director (difficulty curve)
   ui/
     hud.rs              — bars, speedometer, banners, letterbox/vignette
 assets/                 — textures/ audio/ models/ music/ (Module 5)

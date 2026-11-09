@@ -1,2 +1,4 @@
-//! Game entities (truck today; bikes, buggies, armored cars, boss etc. land in Module 2+).
+//! Game entities: the war rig, its projectiles, and the machines hunting it.
+pub mod enemies;
+pub mod projectiles;
 pub mod truck;

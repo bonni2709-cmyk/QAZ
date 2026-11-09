@@ -1,29 +1,122 @@
-//! Driving state — the endless highway run.
+//! Driving state — the endless highway run, now with combat.
 //!
-//! Inputs (desktop): W/↑ gas · S/↓ brake/reverse · A,D/←,→ steer · Space (nothing yet, reserved for Module 2 weapons) · R reset · Esc pause.
-//! Inputs (Android): AUTO-GAS at 72 % throttle, hold left/right screen third to steer.
-//! The 3D scene is rendered with a Y-up chase camera; HUD is a 2D overlay.
+//! Inputs (desktop): W/↑ gas · S/↓ brake/reverse · A,D/←,→ steer · mouse aims
+//! the turret (cursor grabbed) · LMB / Space fire · 1/2/Q ammo · R reset · Esc pause.
+//! Inputs (Android): AUTO-GAS, hold screen thirds to steer, auto-aim tracks the
+//! nearest hostile, FIRE button bottom-right.
+//!
+//! The rig wrecks at 0 HULL: the run ends, stats show, R rolls out again.
 
 use macroquad::prelude::*;
 
+use crate::entities::enemies::{EnemyFrameEvents, EnemyKind, EnemyPool};
+use crate::entities::projectiles::{ProjKind, ProjOwner, ProjectilePool};
 use crate::entities::truck::Truck;
 use crate::systems::chase::ChaseCamera;
+use crate::systems::director::Director;
+use crate::systems::particles::{ParticlePool, TracerPool};
+use crate::systems::turret::{AmmoKind, TurretState};
 use crate::ui::{self, HudData};
 use crate::world::road::{biome_at, draw_world, haze_color, Biome, ROAD_HALF};
 
-/// Length of one full day/night cycle in seconds (game time runs fast).
+/// Length of one full day/night cycle in seconds.
 const DAY_LENGTH_S: f32 = 240.0;
 
 pub struct DrivingState {
     truck: Truck,
     camera: ChaseCamera,
+    projectiles: ProjectilePool,
+    enemies: EnemyPool,
+    particles: ParticlePool,
+    tracers: TracerPool,
+    turret: TurretState,
+    director: Director,
+    events: EnemyFrameEvents,
+    hit_rng: u64,
     time_of_day: f32,
     distance_m: f32,
     best_m: f32,
+    kills: u32,
     biome_band: u32,
     banner_timer: f32,
     paused: bool,
+    wrecked: bool,
+    wreck_boom_done: bool,
     fade_in: f32,
+    hit_timer: f32,
+    kill_timer: f32,
+    rocket_warning: bool,
+}
+
+#[inline]
+fn hit_roll(rng: &mut u64) -> f32 {
+    let mut x = *rng;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    *rng = x;
+    (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f32 / (1u64 << 53) as f32
+}
+
+#[inline]
+fn segment_hits_sphere(a: Vec3, b: Vec3, center: Vec3, radius: f32) -> bool {
+    let ab = b - a;
+    let ap = center - a;
+    let ab_len2 = ab.length_squared();
+    let t = if ab_len2 > 1e-6 {
+        (ap.dot(ab) / ab_len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let closest = a + ab * t;
+    closest.distance_squared(center) <= radius * radius
+}
+
+/// Projectile kind for the current ammo selection.
+#[inline]
+fn proj_kind(ammo: AmmoKind) -> ProjKind {
+    match ammo {
+        AmmoKind::Ap => ProjKind::Ap,
+        AmmoKind::Incendiary => ProjKind::Incendiary,
+    }
+}
+
+/// Base damage a player projectile deals to a target with/without armor.
+/// `None` = read armor from the enemy at hit time.
+#[inline]
+fn turret_damage(ammo: AmmoKind, armored: bool) -> f32 {
+    ammo.damage(armored)
+}
+
+/// Hit Y for each enemy kind (center of mass for the sphere test).
+#[inline]
+fn enemy_center(kind: EnemyKind, pos: Vec3) -> Vec3 {
+    let drop = match kind {
+        EnemyKind::Biker => 1.1,
+        EnemyKind::Buggy => 0.95,
+        EnemyKind::Armored => 1.25,
+    };
+    pos + vec3(0.0, drop, 0.0)
+}
+
+#[cfg(target_os = "android")]
+fn android_fire_touch() -> bool {
+    let (cx, cy, r) = crate::ui::fire_button_center();
+    touches().iter().any(|t| {
+        matches!(
+            t.phase,
+            TouchPhase::Started | TouchPhase::Moved | TouchPhase::Stationary
+        ) && {
+            let dx = t.position.x - cx;
+            let dy = t.position.y - cy;
+            dx * dx + dy * dy <= r * r
+        }
+    })
+}
+
+#[cfg(not(target_os = "android"))]
+fn android_fire_touch() -> bool {
+    false
 }
 
 impl DrivingState {
@@ -31,14 +124,35 @@ impl DrivingState {
         DrivingState {
             truck: Truck::new(),
             camera: ChaseCamera::new(),
+            projectiles: ProjectilePool::new(),
+            enemies: EnemyPool::new(),
+            particles: ParticlePool::new(),
+            tracers: TracerPool::new(),
+            turret: TurretState::new(),
+            director: Director::new(),
+            events: EnemyFrameEvents::new(),
+            hit_rng: 0xA5A5_5A5A_3C3C_C3C3,
             time_of_day: 0.34, // mid-morning wasteland light
             distance_m: 0.0,
             best_m: 0.0,
+            kills: 0,
             biome_band: biome_at(0.0).band_index(),
-            banner_timer: 3.2, // greet the player with the starting biome
+            banner_timer: 3.2,
             paused: false,
+            wrecked: false,
+            wreck_boom_done: false,
             fade_in: 1.0,
+            hit_timer: 0.0,
+            kill_timer: 0.0,
+            rocket_warning: false,
         }
+    }
+
+    /// Full run reset (R). Keeps the session best distance.
+    fn reset_run(&mut self) {
+        let best = self.best_m;
+        *self = DrivingState::new();
+        self.best_m = best;
     }
 
     #[inline]
@@ -78,7 +192,6 @@ impl DrivingState {
             ]
         };
 
-        // 12 % biome haze so swamp/city air reads different
         let haze = haze_color(biome, 1.0);
         Color::new(
             base[0] * 0.88 + haze.r * 0.12,
@@ -88,7 +201,29 @@ impl DrivingState {
         )
     }
 
+    fn on_enemy_killed(&mut self, index: usize) {
+        let Some(enemy) = self.enemies.get(index) else {
+            return;
+        };
+        let pos = enemy.pos;
+        let kind = enemy.kind;
+        let scale = match kind {
+            EnemyKind::Biker => 0.75,
+            EnemyKind::Buggy => 1.0,
+            EnemyKind::Armored => 1.85,
+        };
+        self.particles.explosion(pos + vec3(0.0, 0.8, 0.0), scale);
+        if kind == EnemyKind::Armored {
+            self.camera.add_shake(0.30);
+        }
+        self.enemies.deactivate(index);
+        self.kills += 1;
+        self.kill_timer = 1.0;
+    }
+
     pub fn update(&mut self, dt: f32) {
+        let time = get_time() as f32;
+
         // ---------- global keys ----------
         let mut pause_toggle = is_key_pressed(KeyCode::Escape);
         #[cfg(target_os = "android")]
@@ -97,16 +232,22 @@ impl DrivingState {
                 pause_toggle = true;
             }
         }
-        if pause_toggle {
+        if pause_toggle && !self.wrecked {
             self.paused = !self.paused;
         }
 
         if is_key_pressed(KeyCode::R) {
-            self.truck.reset();
-            self.camera = ChaseCamera::new();
-            self.distance_m = 0.0;
-            self.time_of_day = 0.34;
-            self.fade_in = 1.0;
+            self.reset_run();
+            return;
+        }
+
+        // cursor grabbing follows pause / wreck state
+        if self.paused || self.wrecked {
+            set_cursor_grab(false);
+            show_mouse(true);
+        } else {
+            set_cursor_grab(true);
+            show_mouse(false);
         }
 
         if self.paused {
@@ -115,7 +256,29 @@ impl DrivingState {
 
         self.fade_in = (self.fade_in - dt * 1.6).max(0.0);
         self.banner_timer = (self.banner_timer - dt).max(0.0);
+        self.hit_timer = (self.hit_timer - dt * 2.6).max(0.0);
+        self.kill_timer = (self.kill_timer - dt * 1.8).max(0.0);
         self.time_of_day = (self.time_of_day + dt / DAY_LENGTH_S).rem_euclid(1.0);
+
+        // ---------- wrecked: the world keeps burning, the run is over ----------
+        if self.wrecked {
+            if !self.wreck_boom_done {
+                self.wreck_boom_done = true;
+                self.particles.explosion(self.truck.position + vec3(0.0, 1.6, 0.0), 2.6);
+                self.particles.explosion(self.truck.position + vec3(0.0, 1.0, 2.2), 1.5);
+                self.camera.add_shake(1.25);
+            }
+            // continuous fireballs on the wreck
+            if (time * 17.0).fract() < dt * 17.0 {
+                let p = self.truck.position;
+                self.particles.burn_touch(p + vec3(0.5, 2.7, -1.1));
+                self.particles.burn_touch(p + vec3(-0.6, 2.2, 0.6));
+            }
+            self.particles.update(dt);
+            self.tracers.update(dt);
+            self.camera.update(self.truck.position, self.truck.forward(), 0.0, 0.0, dt);
+            return;
+        }
 
         // ---------- driving input ----------
         let mut throttle = 0.0f32;
@@ -132,9 +295,11 @@ impl DrivingState {
         if is_key_down(KeyCode::D) || is_key_down(KeyCode::Right) {
             steer += 1.0;
         }
-        // touch: left/right screen thirds steer; AUTO-GAS on phones
         for touch in touches() {
-            if matches!(touch.phase, TouchPhase::Started | TouchPhase::Moved | TouchPhase::Stationary) {
+            if matches!(
+                touch.phase,
+                TouchPhase::Started | TouchPhase::Moved | TouchPhase::Stationary
+            ) {
                 let frac = touch.position.x / screen_width();
                 if frac < 0.38 {
                     steer -= 1.0;
@@ -146,28 +311,261 @@ impl DrivingState {
         #[cfg(target_os = "android")]
         {
             if throttle == 0.0 {
-                throttle = 0.72; // AUTO-GAS — thumbs stay on the steer zones
+                throttle = 0.72; // AUTO-GAS
             }
         }
         let steer = steer.clamp(-1.0, 1.0);
 
+        // ---------- turret aiming ----------
+        #[cfg(target_os = "android")]
+        {
+            if let Some(idx) = self.enemies.nearest_to(self.truck.position) {
+                if let Some(target) = self.enemies.get(idx) {
+                    let dist = target.pos.distance(self.truck.position);
+                    let lead = target.velocity() * (dist / 140.0) * 0.62;
+                    let aim = target.pos + vec3(0.0, 1.1, 0.0) + lead - self.truck.position;
+                    let desired_world = aim.x.atan2(aim.z);
+                    self.turret.track(desired_world, self.truck.yaw, dt);
+                }
+            }
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            // macroquad's mouse_delta_position() is (last_frame - current), i.e. inverted
+            let dx = -mouse_delta_position().x;
+            self.turret.add_aim(dx);
+        }
+
+        if is_key_pressed(KeyCode::Key1) {
+            self.turret.set_ammo(AmmoKind::Ap);
+        }
+        if is_key_pressed(KeyCode::Key2) {
+            self.turret.set_ammo(AmmoKind::Incendiary);
+        }
+        if is_key_pressed(KeyCode::Q) {
+            self.turret.cycle_ammo();
+        }
+
+        self.truck.set_turret_yaw(self.turret.yaw);
+        self.turret.update(dt);
+
+        // ---------- firing ----------
+        let fire_held = is_mouse_button_down(MouseButton::Left)
+            || is_key_down(KeyCode::Space)
+            || android_fire_touch();
+        if fire_held && self.turret.try_fire() {
+            let (muzzle, dir) = self.truck.turret_muzzle();
+            let ammo = self.turret.ammo;
+            self.projectiles.spawn(
+                muzzle,
+                ammo.velocity(dir),
+                proj_kind(ammo),
+                ProjOwner::Player,
+                0.0, // damage resolved at hit (armor-dependent)
+                ammo.life(),
+            );
+            self.particles.muzzle(muzzle, dir);
+            self.camera.add_shake(0.038);
+        }
+
+        // ---------- physics & damage ----------
         let offroad = self.truck.position.x.abs() > ROAD_HALF + 0.5;
-        self.truck.update(dt, throttle, steer, offroad, get_time() as f32);
+        self.truck.update(dt, throttle, steer, offroad);
 
         self.distance_m = self.distance_m.max(self.truck.position.z.max(0.0));
         self.best_m = self.best_m.max(self.distance_m);
 
-        // ---------- biome transition banner ----------
         let band = biome_at(self.truck.position.z).band_index();
         if band != self.biome_band {
             self.biome_band = band;
             self.banner_timer = 3.2;
         }
 
+        // ---------- hostiles ----------
+        self.director.update(dt, self.distance_m, self.truck.position.z, &mut self.enemies);
+        self.enemies.update(
+            dt,
+            self.truck.position,
+            self.truck.velocity(),
+            time,
+            &mut self.events,
+            &mut self.particles,
+        );
+
+        // rockets requested by armored cars
+        for rocket in self.events.rockets() {
+            self.projectiles.spawn(
+                rocket.origin,
+                rocket.velocity,
+                ProjKind::Rocket,
+                ProjOwner::Enemy,
+                rocket.damage,
+                7.0,
+            );
+            self.camera.add_shake(0.05);
+        }
+
+        // SMG hitscan from bikers
+        for shot in self.events.smg_shots() {
+            self.tracers.shoot(shot.from, shot.to, Color::new(1.0, 0.88, 0.45, 1.0), 0.10);
+            if hit_roll(&mut self.hit_rng) < shot.hit_chance {
+                self.truck.apply_damage(shot.damage);
+                self.camera.add_shake(0.06);
+            }
+        }
+
+        // burn-damage kills: sweep any enemy whose hull burned through
+        for j in 0..self.enemies.count() {
+            let dead = self.enemies.get(j).map(|e| e.hp <= 0.0).unwrap_or(false);
+            if dead {
+                self.on_enemy_killed(j);
+            }
+        }
+
+        // ---------- projectiles ----------
+        self.projectiles.update(dt);
+        self.rocket_warning =
+            self.projectiles.any_enemy_rocket_near(self.truck.position, 32.0);
+
+        for i in 0..self.projectiles.capacity() {
+            let Some((pos, prev, kind, owner, damage)) = self.projectiles.get(i) else {
+                continue;
+            };
+            match owner {
+                ProjOwner::Player => {
+                    let mut consumed = false;
+                    for j in 0..self.enemies.count() {
+                        let Some(enemy) = self.enemies.get(j) else {
+                            continue;
+                        };
+                        let radius = enemy.kind.radius();
+                        let center = enemy_center(enemy.kind, enemy.pos);
+                        if !segment_hits_sphere(prev, pos, center, radius) {
+                            continue;
+                        }
+                        let armored = enemy.kind.is_armored();
+                        let ammo = match kind {
+                            ProjKind::Ap => AmmoKind::Ap,
+                            _ => AmmoKind::Incendiary,
+                        };
+                        let mut dealt = turret_damage(ammo, armored);
+                        let mut ricocheted = false;
+                        if kind == ProjKind::Ap && armored && hit_roll(&mut self.hit_rng) < 0.30 {
+                            ricocheted = true;
+                            dealt = 12.0;
+                        }
+                        let died = self.enemies.apply_damage(j, dealt);
+                        if kind == ProjKind::Incendiary && !ricocheted {
+                            self.enemies.apply_burn(j, 9.0, 3.0);
+                        }
+                        if ricocheted {
+                            self.particles.ricochet(pos);
+                        } else {
+                            self.particles.impact(pos, kind == ProjKind::Incendiary);
+                        }
+                        self.hit_timer = 1.0;
+                        if died {
+                            self.on_enemy_killed(j);
+                        }
+                        consumed = true;
+                        break;
+                    }
+                    if consumed {
+                        self.projectiles.deactivate(i);
+                    }
+                }
+                ProjOwner::Enemy => {
+                    if kind != ProjKind::Rocket {
+                        continue;
+                    }
+                    let ground_hit = pos.y <= 0.12;
+                    let truck_hit = pos.distance_squared(
+                        self.truck.position + vec3(0.0, 1.5, 0.0),
+                    ) < 2.7 * 2.7;
+                    if !truck_hit && !ground_hit {
+                        continue;
+                    }
+                    let dist = pos.distance(self.truck.position);
+                    let direct = if truck_hit { damage } else { 0.0 };
+                    let splash = (1.0 - (dist / 7.5).clamp(0.0, 1.0)) * 15.0;
+                    let total = (direct + splash).min(38.0);
+                    if total > 0.5 {
+                        self.truck.apply_damage(total);
+                    }
+                    self.particles.explosion(pos, 1.15);
+                    let near = 1.0 - (dist / 40.0).clamp(0.0, 1.0);
+                    self.camera.add_shake(0.34 + 0.28 * near);
+                    self.projectiles.deactivate(i);
+                }
+            }
+        }
+
+        // rocket smoke breadcrumbs
+        for pos in self.projectiles.rocket_smoke_positions() {
+            if hit_roll(&mut self.hit_rng) < 0.55 {
+                self.particles.rocket_smoke(pos);
+            }
+        }
+
+        // ---------- ram collisions (bikers & buggies) ----------
+        for j in 0..self.enemies.count() {
+            let Some(enemy) = self.enemies.get(j) else {
+                continue;
+            };
+            let kind = enemy.kind;
+            if kind == EnemyKind::Armored {
+                continue;
+            }
+            let delta = enemy.pos - self.truck.position;
+            let horizontal = vec2(delta.x, delta.z).length();
+            if horizontal >= 2.55 || enemy.pos.y >= 1.8 {
+                continue;
+            }
+            match kind {
+                EnemyKind::Biker => {
+                    self.truck.apply_damage(9.0);
+                    self.particles.explosion(enemy.pos + vec3(0.0, 0.6, 0.0), 0.7);
+                    self.enemies.deactivate(j);
+                    self.kills += 1;
+                    self.kill_timer = 1.0;
+                    self.camera.add_shake(0.26);
+                }
+                EnemyKind::Buggy => {
+                    self.truck.apply_damage(14.0);
+                    let away = vec2(delta.x, delta.z);
+                    let away_len = away.length().max(0.001);
+                    let away3 = vec3(away.x / away_len, 0.0, away.y / away_len);
+                    if let Some(e) = self.enemies.get_mut(j) {
+                        e.bounce(away3);
+                    }
+                    let died = self.enemies.apply_damage(j, 18.0);
+                    if died {
+                        self.on_enemy_killed(j);
+                    }
+                    self.camera.add_shake(0.3);
+                }
+                EnemyKind::Armored => {}
+            }
+        }
+
+        // ---------- hull integrity ----------
+        if self.truck.health <= 0.0 {
+            self.wrecked = true;
+        }
+
+        // ---------- effects ----------
+        self.particles.update(dt);
+        self.tracers.update(dt);
+
         // ---------- chase camera ----------
         let speed_norm = (self.truck.speed / 33.0).clamp(0.0, 1.0);
-        self.camera
-            .update(self.truck.position, self.truck.forward(), self.truck.steer, speed_norm, dt);
+        self.camera.update(
+            self.truck.position,
+            self.truck.forward(),
+            self.truck.steer,
+            speed_norm,
+            dt,
+        );
     }
 
     pub fn draw(&mut self) {
@@ -180,7 +578,11 @@ impl DrivingState {
         clear_background(self.sky_color(biome));
         set_camera(&self.camera.to_camera3d(speed_norm));
         draw_world(z, ambient);
+        self.enemies.draw(ambient);
+        self.projectiles.draw();
         self.truck.draw(ambient);
+        self.particles.draw();
+        self.tracers.draw();
         set_default_camera();
 
         // ---------- 2D pass ----------
@@ -189,29 +591,50 @@ impl DrivingState {
             max_health: self.truck.max_health,
             fuel: self.truck.fuel,
             max_fuel: self.truck.max_fuel,
-            turret_heat: self.truck.turret_heat,
+            turret_heat: self.turret.heat,
             speed_kmh: self.truck.speed_kmh(),
             distance_m: self.distance_m,
             best_m: self.best_m,
             biome: biome.name(),
             offroad: self.truck.position.x.abs() > ROAD_HALF + 0.5,
             low_fuel: self.truck.fuel / self.truck.max_fuel < 0.15,
+            kills: self.kills,
+            ammo: self.turret.ammo.label(),
+            ammo_short: self.turret.ammo.short(),
+            overheated: self.turret.overheated,
         });
         ui::draw_letterbox_and_vignette();
 
         if self.banner_timer > 0.0 {
-            // fade in over first 0.4 s, hold, fade out over last 0.8 s
             let t = self.banner_timer;
             let alpha = (t / 0.8).min(1.0).min((3.2 - t) / 0.4).clamp(0.0, 1.0);
             ui::draw_biome_banner(biome.name(), alpha);
         }
 
+        if self.rocket_warning && !self.wrecked {
+            ui::draw_incoming_warning();
+        }
+
+        if !self.paused && !self.wrecked {
+            ui::draw_crosshair(self.turret.overheated, self.hit_timer, self.kill_timer);
+        }
+
         if self.fade_in > 0.0 {
-            draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, self.fade_in * 0.9));
+            draw_rectangle(
+                0.0,
+                0.0,
+                screen_width(),
+                screen_height(),
+                Color::new(0.0, 0.0, 0.0, self.fade_in * 0.9),
+            );
         }
 
         if self.paused {
             ui::draw_pause_overlay();
+        }
+
+        if self.wrecked {
+            ui::draw_wrecked_overlay(self.distance_m, self.best_m, self.kills);
         }
     }
 }

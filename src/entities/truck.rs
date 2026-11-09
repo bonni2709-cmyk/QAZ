@@ -55,8 +55,6 @@ pub struct Truck {
     pub max_health: f32,
     pub fuel: f32,
     pub max_fuel: f32,
-    /// 0 = cold, 1 = overheated (Module 2 turns this into the real turret system).
-    pub turret_heat: f32,
     wheel_spin: f32,
     turret_yaw: f32,
 
@@ -79,7 +77,6 @@ impl Truck {
             max_health: 100.0,
             fuel: 100.0,
             max_fuel: 100.0,
-            turret_heat: 0.0,
             wheel_spin: 0.0,
             turret_yaw: 0.0,
             body,
@@ -96,6 +93,41 @@ impl Truck {
     /// Speed in km/h for the HUD.
     pub fn speed_kmh(&self) -> f32 {
         self.speed.abs() * 3.6
+    }
+
+    /// Set the turret's relative yaw (driven by the turret controller).
+    pub fn set_turret_yaw(&mut self, yaw: f32) {
+        self.turret_yaw = yaw;
+    }
+
+    /// Absolute world yaw of the turret (truck yaw + relative turret yaw).
+    pub fn turret_world_yaw(&self) -> f32 {
+        self.yaw + self.turret_yaw
+    }
+
+    /// World-space muzzle position and flat firing direction.
+    pub fn turret_muzzle(&self) -> (Vec3, Vec3) {
+        let world_yaw = self.turret_world_yaw();
+        let dir = vec3(world_yaw.sin(), 0.0, world_yaw.cos());
+        // rotate the pivot offset from local to world (Y-up, around the truck yaw)
+        let (sy, cy) = (self.yaw.sin(), self.yaw.cos());
+        let pivot_world = vec3(
+            self.position.x + TURRET_PIVOT.x * cy + TURRET_PIVOT.z * sy,
+            self.position.y + TURRET_PIVOT.y,
+            self.position.z - TURRET_PIVOT.x * sy + TURRET_PIVOT.z * cy,
+        );
+        let muzzle = pivot_world + vec3(dir.x * 2.05, 0.21, dir.z * 2.05);
+        (muzzle, dir)
+    }
+
+    /// Apply damage to the hull (fires the health bar; 0 = wrecked).
+    pub fn apply_damage(&mut self, damage: f32) {
+        self.health = (self.health - damage).max(0.0);
+    }
+
+    /// Truck velocity vector (used for rocket lead prediction).
+    pub fn velocity(&self) -> Vec3 {
+        self.forward() * self.speed
     }
 
     fn build_body() -> PartMesh {
@@ -349,8 +381,8 @@ impl Truck {
     }
 
     /// Advance the simulation. `throttle` ∈ [-1, 1] (negative = brake/reverse),
-    /// `steer_input` ∈ [-1, 1] (negative = left), `now` = seconds since boot.
-    pub fn update(&mut self, dt: f32, throttle: f32, steer_input: f32, offroad: bool, now: f32) {
+    /// `steer_input` ∈ [-1, 1] (negative = left).
+    pub fn update(&mut self, dt: f32, throttle: f32, steer_input: f32, offroad: bool) {
         // fuel burn: gentle idle draw + throttle-proportional load
         let burn = 0.010 + throttle.abs() * 0.055;
         self.fuel = (self.fuel - burn * dt).max(0.0);
@@ -386,18 +418,6 @@ impl Truck {
         // turret idles in a slow defensive sweep until Module 2 gives manual fire
         self.turret_yaw = (now * 0.45).sin() * 0.85;
         self.turret_heat = (self.turret_heat - 0.22 * dt).max(0.0);
-    }
-
-    /// Reset to the start of the highway (R / pause menu).
-    pub fn reset(&mut self) {
-        self.position = Vec3::ZERO;
-        self.yaw = 0.0;
-        self.speed = 0.0;
-        self.steer = 0.0;
-        self.wheel_spin = 0.0;
-        self.fuel = self.max_fuel;
-        self.health = self.max_health;
-        self.turret_heat = 0.0;
     }
 
     /// Render. `ambient` ∈ [0, 1.05] from the day/night cycle.
