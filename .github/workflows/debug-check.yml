@@ -3,6 +3,8 @@ name: debug-check
 # errors as `::error::` annotations (retrievable via the check-runs API,
 # since raw step logs are not downloadable in this sandbox).
 on:
+  push:
+    branches: ["arena/**"]
   workflow_dispatch:
 
 jobs:
