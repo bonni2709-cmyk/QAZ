@@ -360,7 +360,7 @@ impl EnemyPool {
                     // SMG — only when roughly facing the rig and inside 55 m
                     e.fire_cooldown -= dt;
                     if e.fire_cooldown <= 0.0 && dist < 55.0 {
-                        e.fire_cooldown = 0.95 + e.phase.frac() * 0.35;
+                        e.fire_cooldown = 0.95 + e.phase.fract() * 0.35;
                         let gun = e.pos + vec3(0.0, 1.15, 0.0) + vec3(e.yaw.sin(), 0.0, e.yaw.cos()) * 0.6;
                         let jitter = vec3(
                             (time * 13.7 + e.phase * 7.0).sin() * 1.1,
@@ -389,7 +389,7 @@ impl EnemyPool {
                     if e.grounded && e.jump_cooldown <= 0.0 && dist < 48.0 {
                         e.vy = 6.4;
                         e.grounded = false;
-                        e.jump_cooldown = 2.1 + e.phase.frac() * 1.1;
+                        e.jump_cooldown = 2.1 + e.phase.fract() * 1.1;
                     }
                     if !e.grounded {
                         e.vy -= 13.5 * dt;
@@ -415,7 +415,7 @@ impl EnemyPool {
                     // rockets on a long cooldown, aimed with partial lead
                     e.rocket_cooldown -= dt;
                     if e.rocket_cooldown <= 0.0 && dist < 95.0 {
-                        e.rocket_cooldown = 2.9 + e.phase.frac() * 1.0;
+                        e.rocket_cooldown = 2.9 + e.phase.fract() * 1.0;
                         let muzzle = e.pos
                             + vec3(0.0, 1.92, 0.0)
                             + vec3(e.yaw.sin(), 0.0, e.yaw.cos()) * 1.35;

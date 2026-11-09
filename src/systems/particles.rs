@@ -109,12 +109,14 @@ impl ParticlePool {
         for _ in 0..fire_n {
             let dir = self.random_dir();
             let speed = self.rand_range(2.5, 8.5) * scale;
+            let life = self.rand_range(0.5, 1.15);
+            let size = self.rand_range(0.35, 0.8) * scale;
             self.spawn(
                 ParticleKind::Fire,
                 pos + dir * 0.4,
                 dir * speed + vec3(0.0, 2.0, 0.0),
-                self.rand_range(0.5, 1.15),
-                self.rand_range(0.35, 0.8) * scale,
+                life,
+                size,
                 -2.4,
                 false,
             );
@@ -123,12 +125,15 @@ impl ParticlePool {
         let smoke_n = (9.0 * scale) as u32;
         for _ in 0..smoke_n {
             let dir = self.random_dir() * 0.6;
+            let vy = self.rand_range(1.6, 3.4);
+            let life = self.rand_range(0.9, 1.9);
+            let size = self.rand_range(0.5, 0.95) * scale;
             self.spawn(
                 ParticleKind::Smoke,
                 pos + vec3(0.0, 0.8, 0.0) + dir,
-                dir * 3.0 + vec3(0.0, self.rand_range(1.6, 3.4), 0.0),
-                self.rand_range(0.9, 1.9),
-                self.rand_range(0.5, 0.95) * scale,
+                dir * 3.0 + vec3(0.0, vy, 0.0),
+                life,
+                size,
                 -1.1,
                 false,
             );
@@ -139,12 +144,14 @@ impl ParticlePool {
             let dir = self.random_dir();
             let mut vel = dir * self.rand_range(5.0, 11.5) * scale;
             vel.y = vel.y.abs() * 0.75 + 2.5; // always kick some upward
+            let life = self.rand_range(1.4, 3.0);
+            let size = self.rand_range(0.09, 0.38) * scale;
             self.spawn(
                 ParticleKind::Debris,
                 pos + vec3(0.0, 0.6, 0.0),
                 vel,
-                self.rand_range(1.4, 3.0),
-                self.rand_range(0.09, 0.38) * scale,
+                life,
+                size,
                 17.5,
                 true,
             );
@@ -152,11 +159,13 @@ impl ParticlePool {
 
         for _ in 0..6 {
             let dir = self.random_dir();
+            let speed = self.rand_range(9.0, 17.0);
+            let life = self.rand_range(0.3, 0.7);
             self.spawn(
                 ParticleKind::Spark,
                 pos + vec3(0.0, 0.7, 0.0),
-                dir * self.rand_range(9.0, 17.0),
-                self.rand_range(0.3, 0.7),
+                dir * speed,
+                life,
                 0.06,
                 9.0,
                 false,
@@ -172,11 +181,13 @@ impl ParticlePool {
                 self.rand_range(-1.0, 2.4),
                 self.rand_range(-2.2, 2.2),
             );
+            let speed = self.rand_range(16.0, 24.0);
+            let life = self.rand_range(0.08, 0.16);
             self.spawn(
                 ParticleKind::Spark,
                 pos,
-                dir * self.rand_range(16.0, 24.0) + jitter,
-                self.rand_range(0.08, 0.16),
+                dir * speed + jitter,
+                life,
                 0.05,
                 2.0,
                 false,
@@ -189,12 +200,15 @@ impl ParticlePool {
         let n = if incendiary { 5 } else { 4 };
         for _ in 0..n {
             let dir = self.random_dir();
+            let speed = self.rand_range(4.0, 9.0);
+            let life = self.rand_range(0.16, 0.38);
+            let size = self.rand_range(0.06, 0.14);
             self.spawn(
                 if incendiary { ParticleKind::Fire } else { ParticleKind::Spark },
                 pos,
-                dir * self.rand_range(4.0, 9.0),
-                self.rand_range(0.16, 0.38),
-                self.rand_range(0.06, 0.14),
+                dir * speed,
+                life,
+                size,
                 if incendiary { -0.8 } else { 8.0 },
                 false,
             );
@@ -205,11 +219,13 @@ impl ParticlePool {
     pub fn ricochet(&mut self, pos: Vec3) {
         for _ in 0..5 {
             let dir = self.random_dir();
+            let speed = self.rand_range(8.0, 14.0);
+            let life = self.rand_range(0.2, 0.4);
             self.spawn(
                 ParticleKind::Spark,
                 pos,
-                dir * self.rand_range(8.0, 14.0) + vec3(0.0, 2.0, 0.0),
-                self.rand_range(0.2, 0.4),
+                dir * speed + vec3(0.0, 2.0, 0.0),
+                life,
                 0.05,
                 8.0,
                 false,
@@ -221,12 +237,15 @@ impl ParticlePool {
     pub fn dust(&mut self, pos: Vec3) {
         for _ in 0..5 {
             let dir = self.random_dir();
+            let spread = self.rand_range(1.5, 3.5);
+            let life = self.rand_range(0.4, 0.8);
+            let size = self.rand_range(0.28, 0.5);
             self.spawn(
                 ParticleKind::Smoke,
                 pos,
-                vec3(dir.x, 0.35, dir.z) * self.rand_range(1.5, 3.5),
-                self.rand_range(0.4, 0.8),
-                self.rand_range(0.28, 0.5),
+                vec3(dir.x, 0.35, dir.z) * spread,
+                life,
+                size,
                 -0.4,
                 false,
             );
@@ -235,12 +254,17 @@ impl ParticlePool {
 
     /// One puff of rocket exhaust. Called every frame while a rocket is alive.
     pub fn rocket_smoke(&mut self, pos: Vec3) {
+        let vx = self.rand_range(-1.0, 1.0);
+        let vy = self.rand_range(0.4, 1.6);
+        let vz = self.rand_range(-1.0, 1.0);
+        let life = self.rand_range(0.35, 0.65);
+        let size = self.rand_range(0.14, 0.26);
         self.spawn(
             ParticleKind::Smoke,
             pos,
-            vec3(self.rand_range(-1.0, 1.0), self.rand_range(0.4, 1.6), self.rand_range(-1.0, 1.0)),
-            self.rand_range(0.35, 0.65),
-            self.rand_range(0.14, 0.26),
+            vec3(vx, vy, vz),
+            life,
+            size,
             -0.6,
             false,
         );
@@ -248,12 +272,20 @@ impl ParticlePool {
 
     /// Sustained fire effect for burning enemies (call once per frame per burning enemy).
     pub fn burn_touch(&mut self, pos: Vec3) {
+        let ox = self.rand_range(-0.4, 0.4);
+        let oy = self.rand_range(0.6, 1.6);
+        let oz = self.rand_range(-0.4, 0.4);
+        let vx = self.rand_range(-0.8, 0.8);
+        let vy = self.rand_range(1.5, 3.0);
+        let vz = self.rand_range(-0.8, 0.8);
+        let life = self.rand_range(0.3, 0.6);
+        let size = self.rand_range(0.22, 0.4);
         self.spawn(
             ParticleKind::Fire,
-            pos + vec3(self.rand_range(-0.4, 0.4), self.rand_range(0.6, 1.6), self.rand_range(-0.4, 0.4)),
-            vec3(self.rand_range(-0.8, 0.8), self.rand_range(1.5, 3.0), self.rand_range(-0.8, 0.8)),
-            self.rand_range(0.3, 0.6),
-            self.rand_range(0.22, 0.4),
+            pos + vec3(ox, oy, oz),
+            vec3(vx, vy, vz),
+            life,
+            size,
             -1.6,
             false,
         );
