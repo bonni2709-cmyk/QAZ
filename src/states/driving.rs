@@ -9,6 +9,7 @@
 
 use macroquad::prelude::*;
 
+use crate::entities::boss::{BossTruck, MinePool};
 use crate::entities::enemies::{EnemyFrameEvents, EnemyKind, EnemyPool};
 use crate::entities::projectiles::{ProjKind, ProjOwner, ProjectilePool};
 use crate::entities::truck::Truck;
@@ -18,6 +19,7 @@ use crate::systems::loot::{LootKind, LootPool};
 use crate::systems::particles::{ParticlePool, TracerPool};
 use crate::systems::turret::{AmmoKind, TurretState};
 use crate::systems::upgrades::UpgradeState;
+use crate::systems::weather::{Weather, WeatherEvent};
 use crate::ui::{self, HudData};
 use crate::world::road::{biome_at, draw_world, haze_color, Biome, ROAD_HALF};
 
@@ -35,6 +37,13 @@ pub struct DrivingState {
     director: Director,
     loot: LootPool,
     upgrades: UpgradeState,
+    weather: Weather,
+    boss: Option<BossTruck>,
+    mines: MinePool,
+    next_boss_at: f32,
+    boss_contact_cd: f32,
+    event_banner: f32,
+    event_banner_text: &'static str,
     events: EnemyFrameEvents,
     hit_rng: u64,
     time_of_day: f32,
@@ -156,6 +165,13 @@ impl DrivingState {
             director: Director::new(),
             loot: LootPool::new(),
             upgrades: UpgradeState::new(),
+            weather: Weather::new(),
+            boss: None,
+            mines: MinePool::new(),
+            next_boss_at: 1300.0,
+            boss_contact_cd: 0.0,
+            event_banner: 0.0,
+            event_banner_text: "",
             events: EnemyFrameEvents::new(),
             hit_rng: 0xA5A5_5A5A_3C3C_C3C3,
             time_of_day: 0.34, // mid-morning wasteland light
@@ -196,7 +212,7 @@ impl DrivingState {
         (0.22 + self.sun_elevation().max(0.0) * 0.82).clamp(0.2, 1.0)
     }
 
-    fn sky_color(&self, biome: Biome) -> Color {
+    fn sky_color(&self, biome: Biome, storm: f32) -> Color {
         let elev = self.sun_elevation();
         let day = [0.34, 0.60, 0.82];
         let dusk = [0.88, 0.47, 0.26];
@@ -223,12 +239,23 @@ impl DrivingState {
         };
 
         let haze = haze_color(biome, 1.0);
-        Color::new(
+        let mut c = Color::new(
             base[0] * 0.88 + haze.r * 0.12,
             base[1] * 0.88 + haze.g * 0.12,
             base[2] * 0.88 + haze.b * 0.12,
             1.0,
-        )
+        );
+        // sandstorm swallows the horizon
+        if storm > 0.01 {
+            let k = storm * 0.62;
+            c = Color::new(
+                c.r + (0.55 - c.r) * k,
+                c.g + (0.39 - c.g) * k,
+                c.b + (0.23 - c.b) * k,
+                1.0,
+            );
+        }
+        c
     }
 
     fn on_enemy_killed(&mut self, index: usize) {
@@ -270,6 +297,28 @@ impl DrivingState {
             }
             _ => {}
         }
+    }
+
+    /// The juggernaut blows: cinematic triple explosion, salvage shower, banner.
+    fn on_boss_killed(&mut self) {
+        let Some(boss) = self.boss.take() else {
+            return;
+        };
+        let pos = boss.pos;
+        self.particles.explosion(pos + vec3(0.0, 1.7, 0.0), 2.5);
+        self.particles.explosion(pos + vec3(0.0, 1.0, 2.4), 1.7);
+        self.particles.explosion(pos + vec3(0.0, 1.0, -2.6), 1.7);
+        self.camera.add_shake(0.9);
+        for _ in 0..6 {
+            let amount = 8 + (hit_roll(&mut self.hit_rng) * 6.0) as u32;
+            self.loot.spawn_scatter(LootKind::Scrap, pos + vec3(0.0, 1.0, 0.0), amount);
+        }
+        self.loot.spawn(LootKind::Repair, pos + vec3(0.0, 1.2, 0.0), 0);
+        self.kills += 1;
+        self.kill_timer = 1.0;
+        self.event_banner = 3.0;
+        self.event_banner_text = "JUGGERNAUT DOWN";
+        self.next_boss_at = self.distance_m + 2600.0;
     }
 
     pub fn update(&mut self, dt: f32) {
@@ -318,9 +367,30 @@ impl DrivingState {
 
         self.fade_in = (self.fade_in - dt * 1.6).max(0.0);
         self.banner_timer = (self.banner_timer - dt).max(0.0);
+        self.event_banner = (self.event_banner - dt).max(0.0);
+        self.boss_contact_cd = (self.boss_contact_cd - dt).max(0.0);
         self.hit_timer = (self.hit_timer - dt * 2.6).max(0.0);
         self.kill_timer = (self.kill_timer - dt * 1.8).max(0.0);
         self.time_of_day = (self.time_of_day + dt / DAY_LENGTH_S).rem_euclid(1.0);
+
+        // ---------- weather ----------
+        match self.weather.update(dt) {
+            WeatherEvent::StormInbound => {
+                self.event_banner = 2.6;
+                self.event_banner_text = "SANDSTORM INBOUND";
+            }
+            WeatherEvent::StormCleared => {
+                self.event_banner = 2.2;
+                self.event_banner_text = "THE STORM BREAKS";
+            }
+            WeatherEvent::None => {}
+        }
+        let storm = self.weather.intensity();
+        if storm > 0.02 {
+            // sand drags at the tires; gusts shove the nose around
+            self.truck.speed -= self.truck.speed * 0.85 * storm * dt;
+            self.truck.apply_wind_gust(self.weather.gust(), dt);
+        }
 
         // ---------- apply workbench upgrades ----------
         self.truck.damage_reduction = self.upgrades.damage_reduction();
@@ -446,6 +516,13 @@ impl DrivingState {
         self.distance_m = self.distance_m.max(self.truck.position.z.max(0.0));
         self.best_m = self.best_m.max(self.distance_m);
 
+        // boss rolls in when the odometer crosses the marker
+        if self.boss.is_none() && self.distance_m >= self.next_boss_at {
+            self.boss = Some(BossTruck::spawn(self.truck.position.z + 150.0));
+            self.event_banner = 3.2;
+            self.event_banner_text = "JUGGERNAUT TANKER AHEAD";
+        }
+
         let band = biome_at(self.truck.position.z).band_index();
         if band != self.biome_band {
             self.biome_band = band;
@@ -483,6 +560,42 @@ impl DrivingState {
                 self.truck.apply_damage(shot.damage);
                 self.camera.add_shake(0.06);
             }
+        }
+
+        // ---------- boss ----------
+        if let Some(boss) = &mut self.boss {
+            let boss_events = boss.update(dt, self.truck.position, self.truck.speed, &mut self.mines);
+            if boss_events.mine_dropped {
+                self.camera.add_shake(0.07);
+            }
+            if boss_events.ramming {
+                // the tanker is shouldering in — the whole hull shudders with it
+                self.camera.add_shake(0.045);
+            }
+        }
+        // escape valve: it wins the footrace or falls absurdly behind → it despawns
+        if let Some(boss) = &self.boss {
+            let gap = boss.pos.z - self.truck.position.z;
+            if gap > 300.0 || gap < -140.0 {
+                self.boss = None;
+                self.next_boss_at = self.distance_m + 1800.0;
+            }
+        }
+        // 26 tons of fuel don't ask permission
+        if let Some(boss) = &self.boss {
+            if self.boss_contact_cd <= 0.0
+                && boss.horizontal_distance_to(self.truck.position) < 3.6
+            {
+                self.boss_contact_cd = 1.6;
+                self.truck.apply_damage(26.0);
+                self.camera.add_shake(0.5);
+            }
+        }
+        // mines tick on their own clock
+        let mine_dmg = self.mines.update(dt, self.truck.position, &mut self.particles);
+        if mine_dmg > 0.0 {
+            self.truck.apply_damage(mine_dmg);
+            self.camera.add_shake(0.45);
         }
 
         // burn-damage kills: sweep any enemy whose hull burned through
@@ -540,6 +653,27 @@ impl DrivingState {
                         }
                         consumed = true;
                         break;
+                    }
+                    // boss hull test — only if no regular enemy soaked the round
+                    if !consumed {
+                        if let Some(boss) = &mut self.boss {
+                            let center = boss.pos + vec3(0.0, 2.05, 0.0);
+                            if segment_hits_sphere(prev, pos, center, BossTruck::RADIUS) {
+                                let boss_ammo = match kind {
+                                    ProjKind::Ap => AmmoKind::Ap,
+                                    _ => AmmoKind::Incendiary,
+                                };
+                                let incendiary = kind == ProjKind::Incendiary;
+                                let dealt = turret_damage(boss_ammo, true);
+                                let boss_died = boss.apply_damage(dealt, incendiary);
+                                self.particles.impact(pos, incendiary);
+                                self.hit_timer = 1.0;
+                                if boss_died {
+                                    self.on_boss_killed();
+                                }
+                                consumed = true;
+                            }
+                        }
                     }
                     if consumed {
                         self.projectiles.deactivate(i);
@@ -655,14 +789,19 @@ impl DrivingState {
         let time = get_time() as f32;
         let z = self.truck.position.z;
         let biome = biome_at(z);
-        let ambient = self.ambient();
+        let storm = self.weather.intensity();
+        let ambient = (self.ambient() * (1.0 - storm * 0.35)).max(0.14);
         let speed_norm = (self.truck.speed / 33.0).clamp(0.0, 1.0);
 
         // ---------- 3D pass ----------
-        clear_background(self.sky_color(biome));
+        clear_background(self.sky_color(biome, storm));
         set_camera(&self.camera.to_camera3d(speed_norm));
         draw_world(z, ambient);
         self.enemies.draw(ambient);
+        if let Some(boss) = &mut self.boss {
+            boss.draw(ambient, time);
+        }
+        self.mines.draw(time);
         self.loot.draw(ambient, time);
         // magnet beam: hot filaments from the rig to every attracted pickup
         let truck_top = self.truck.position + vec3(0.0, 2.6, 0.0);
@@ -674,6 +813,26 @@ impl DrivingState {
         self.particles.draw();
         self.tracers.draw();
         set_default_camera();
+
+        // ---------- sandstorm veil + wind streaks (under HUD) ----------
+        if storm > 0.02 {
+            let sw = screen_width();
+            let sh = screen_height();
+            draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.60, 0.42, 0.24, 0.33 * storm));
+            let rand = |k: f32| -> f32 {
+                let x = (k * 12.9898).sin() * 43758.5453;
+                x - x.floor()
+            };
+            for i in 0..26 {
+                let k = i as f32 + 1.0;
+                let speed = 340.0 + rand(k) * 260.0;
+                let y = rand(k * 1.7 + 3.1) * sh;
+                let len = 80.0 + rand(k * 2.3 + 7.7) * 170.0;
+                let x = (time * speed + k * 173.0).rem_euclid(sw + len * 2.0) - len;
+                let alpha = (0.10 + 0.12 * (rand(k * 3.1) * (time * 2.0 + k).sin() * 0.5 + 0.5)) * storm;
+                draw_rectangle(x, y, len, 2.0 + (i % 3) as f32, Color::new(0.85, 0.68, 0.42, alpha));
+            }
+        }
 
         // ---------- 2D pass ----------
         ui::draw_hud(&HudData {
@@ -690,6 +849,8 @@ impl DrivingState {
             low_fuel: self.truck.fuel / self.truck.max_fuel < 0.15,
             kills: self.kills,
             scrap: self.upgrades.scrap(),
+            storm,
+            boss_ratio: self.boss.as_ref().map(|b| b.hp_ratio()).unwrap_or(-1.0),
             ammo: self.turret.ammo.label(),
             ammo_short: self.turret.ammo.short(),
             overheated: self.turret.overheated,
@@ -700,6 +861,17 @@ impl DrivingState {
             let t = self.banner_timer;
             let alpha = (t / 0.8).min(1.0).min((3.2 - t) / 0.4).clamp(0.0, 1.0);
             ui::draw_biome_banner(biome.name(), alpha);
+        }
+
+        if self.event_banner > 0.0 {
+            let t = self.event_banner;
+            let alpha = (t / 0.5).clamp(0.0, 1.0).min((3.2 - t) / 0.4).clamp(0.0, 1.0).max(0.0);
+            let sw = screen_width();
+            let dim = measure_text(self.event_banner_text, None, 38, 1.0);
+            let x = (sw - dim.width) * 0.5;
+            let y = screen_height() * 0.235;
+            draw_text(self.event_banner_text, x + 2.0, y + 2.0, 38.0, Color::new(0.0, 0.0, 0.0, alpha * 0.75));
+            draw_text(self.event_banner_text, x, y, 38.0, Color::new(1.0, 0.64, 0.2, alpha));
         }
 
         if self.rocket_warning && !self.wrecked && !self.workbench_open {

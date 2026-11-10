@@ -6,3 +6,4 @@ pub mod meshkit;
 pub mod particles;
 pub mod turret;
 pub mod upgrades;
+pub mod weather;

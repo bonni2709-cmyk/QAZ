@@ -153,6 +153,11 @@ impl Truck {
         self.forward() * self.speed
     }
 
+    /// Sandstorm gust: nudges the nose sideways. Drift grows with speed.
+    pub fn apply_wind_gust(&mut self, gust: f32, dt: f32) {
+        self.yaw += gust * 0.055 * dt * (0.4 + self.speed.abs() * 0.02);
+    }
+
     fn build_body() -> PartMesh {
         // -- chassis & underbody --
         let mut body = PartMesh::cuboid_at(vec3(2.0, 0.35, 6.3), DARK, vec3(0.0, 1.02, 0.0));

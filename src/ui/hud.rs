@@ -20,6 +20,10 @@ pub struct HudData<'a> {
     pub ammo_short: &'a str,
     pub overheated: bool,
     pub scrap: u32,
+    /// Sandstorm strength 0..1 (drives the SANDSTORM chip).
+    pub storm: f32,
+    /// Boss integrity 0..1, or < 0 when no boss is active.
+    pub boss_ratio: f32,
 }
 
 #[inline]
@@ -164,6 +168,41 @@ fn draw_run_stats(d: &HudData<'_>, s: f32) {
         15.0 * s,
         Color::new(0.98, 0.72, 0.24, 0.95),
     );
+
+    if d.storm > 0.3 {
+        let blink = (get_time() * 3.5).sin() > -0.35;
+        if blink {
+            let txt = "SANDSTORM";
+            let t_dim = measure_text(txt, None, (15.0 * s) as u16, 1.0);
+            draw_text(
+                txt,
+                sw - 24.0 - t_dim.width,
+                cy + 22.0 * s + 54.0 * s,
+                15.0 * s,
+                Color::new(0.92, 0.7, 0.35, 0.95),
+            );
+        }
+    }
+}
+
+/// Boss integrity bar — top-center, only while the juggernaut lives.
+fn draw_boss_bar(d: &HudData<'_>, s: f32) {
+    if d.boss_ratio < 0.0 {
+        return;
+    }
+    let sw = screen_width();
+    let w = (sw * 0.38).clamp(280.0, 520.0);
+    let h = 12.0 * s;
+    let x = (sw - w) * 0.5;
+    let y = screen_height() * 0.062;
+    let name = "JUGGERNAUT";
+    let nd = measure_text(name, None, (15.0 * s) as u16, 1.0);
+    draw_text(name, (sw - nd.width) * 0.5, y - 5.0, 15.0 * s, Color::new(0.96, 0.72, 0.42, 1.0));
+    draw_rectangle(x - 1.5, y, w + 3.0, h + 3.0, Color::new(0.0, 0.0, 0.0, 0.78));
+    draw_rectangle(x, y + 1.5, w, h, Color::new(0.16, 0.05, 0.04, 0.95));
+    let fw = w * d.boss_ratio.clamp(0.0, 1.0);
+    draw_rectangle(x, y + 1.5, fw, h, Color::new(0.78, 0.18, 0.1, 1.0));
+    draw_rectangle(x, y + 1.5, fw, h * 0.4, Color::new(1.0, 0.5, 0.3, 0.45));
 }
 
 /// Big speedometer bottom-center.
@@ -184,6 +223,7 @@ pub fn draw_hud(d: &HudData<'_>) {
     draw_status_bars(d, s);
     draw_run_stats(d, s);
     draw_speedometer(d, s);
+    draw_boss_bar(d, s);
 
     // FPS readout (bottom-right, small — the 60 FPS contract is monitored)
     let fps = format!("{} FPS", get_fps());
@@ -326,7 +366,7 @@ pub fn draw_pause_overlay() {
         "1 / 2 — SWAP AMMO (AP / INCENDIARY)",
         "TAB — WHEELED WORKBENCH (upgrades)",
         "",
-        "MODULE 3 · SALVAGE & WORKBENCH",
+        "MODULE 4 · STORMS & THE JUGGERNAUT",
     ];
     let mut y = sh * 0.50;
     for line in lines {

@@ -21,7 +21,7 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 | 1 | 3D core & transport (truck, procedural road, biomes, chase cam, HUD, loading) | **DONE — this branch** |
 | 2 | Combat: 360° turret, overheating, AP/incendiary ammo, bikers/buggies/armored cars, tracers, 3D-part debris | **DONE — this branch** |
 | 3 | Looting on the move (magnet beam, wheeled workbench, turret/armor/engine upgrades) | **DONE — this branch** |
-| 4 | Weather & lighting (day/night done early, sandstorms), Boss #1: tanker truck | planned |
+| 4 | Weather & lighting (day/night done early, sandstorms), Boss #1: tanker truck | **DONE — this branch** |
 | 5 | Heavy assets: 4K textures, WAV audio, 5-min track, multi-arch CI polish | planned |
 | 6 | UI/menus, JSON saves, APK packaging, icon | planned |
 | 7 | On-foot scavenging: outposts, safes, tool minis (angle grinder / screwdriver) | planned |
@@ -108,6 +108,27 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
   dimming, purchase flash; desktop + Android hit-testing (touches simulate
   mouse).
 
+## Module 4 — what's inside
+
+- **Sandstorm cycle** (`systems/weather.rs`): Clear → Incoming (warning
+  banner, dust ramps in ≈6 s) → Storm (13–21 s of gusts, extra tire drag,
+  nose-shove gusts, near-whiteout veil + 26 wind streaks) → Clearing → Clear.
+  First storm ~40 s into a run, then every 55–95 s. Sky tints to dust, global
+  ambient drops ~35 %, HUD gains a pulsing SANDSTORM chip.
+- **Boss #1 — JUGGERNAUT** (`entities/boss.rs`): an armored raffinate
+  tanker that shows up at ~1300 m and every ~2600 m after.
+  - Rubber-band chase (holds ≈24 m ahead; 11 m/s floor so the duel persists);
+  - slow sine lane weave + **ram maneuver** every 5–9 s (volatile orange glow
+    telegraph under the cab; contact = 26 dmg + shake);
+  - **lays proximity mines** off the tail every ~4.2 s (amber → red blink;
+    2.35 m trigger, 8 dmg + up to 24 splash);
+  - **armor**: AP deals 80 %, incendiary 35 % — bring the tungsten;
+  - death: triple explosion, 6× scrap shower + medkit, "JUGGERNAUT DOWN"
+    banner, next encounter ≈2600 m later. Top-center integrity bar while it
+    lives.
+- Day/night cycle (4-minute day) was already in place; storms layer on top of
+  it, no art assets required.
+
 ## Controls
 
 | Desktop | Android |
@@ -157,6 +178,7 @@ src/
     truck.rs            — the war rig (build, physics, draw)
     projectiles.rs      — pooled AP/incendiary/rockets (zero alloc)
     enemies.rs          — biker / buggy / armored car + pooled AI
+    boss.rs             — JUGGERNAUT raffinate tanker + pooled proximity mines
   world/
     road.rs             — procedural chunks, biomes, deterministic PRNG
   systems/
@@ -167,6 +189,7 @@ src/
     director.rs         — wave director (difficulty curve + crate seeding)
     loot.rs             — pooled salvage pickups, magnet beam pull, beacons
     upgrades.rs         — scrap economy, 4 workbench tracks (3 ranks each)
+    weather.rs          — sandstorm cycle (roll, gusts, banners)
   ui/
     hud.rs              — bars, speedometer, banners, letterbox/vignette
     workbench.rs        — wheeled-workbench upgrade panel (TAB/WB)

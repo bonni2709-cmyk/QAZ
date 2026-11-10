@@ -385,6 +385,93 @@ impl PartMesh {
         PartMesh::from_raw(positions, uvs, shades, emissive, colors, indices)
     }
 
+    /// Cylinder along the **Z** axis, centered at `offset` — tanks, pipes, barrels lying flat.
+    /// Circle in the XY plane, extruded along Z.
+    pub fn cylinder_along_z_at(
+        radius_top: f32,
+        radius_bottom: f32,
+        length: f32,
+        sides: u8,
+        color: Color,
+        offset: Vec3,
+    ) -> PartMesh {
+        let sides = sides.max(3) as usize;
+        let step = std::f32::consts::TAU / sides as f32;
+        let half = length * 0.5;
+
+        let mut positions = Vec::with_capacity((sides + 1) * 2 + (sides + 2) * 2);
+        let mut uvs = Vec::new();
+        let mut shades = Vec::new();
+        let mut emissive = Vec::new();
+        let mut colors = Vec::new();
+        let mut indices: Vec<u16> = Vec::new();
+
+        // ---- body (circle in XY, extruded along Z) ----
+        let body_base = positions.len() as u16;
+        for i in 0..=sides {
+            let a = i as f32 * step;
+            let (sin, cos) = a.sin_cos();
+            let normal = Vec3::new(sin, cos, 0.0); // radial, outward
+            let shade = (0.58 + 0.46 * sun_dot(normal)).clamp(0.40, 1.06);
+            positions.push(Vec3::new(sin * radius_bottom, cos * radius_bottom, -half) + offset);
+            positions.push(Vec3::new(sin * radius_top, cos * radius_top, half) + offset);
+            uvs.push(Vec2::new(i as f32 / sides as f32, 0.0));
+            uvs.push(Vec2::new(i as f32 / sides as f32, 1.0));
+            shades.push(shade);
+            shades.push(shade);
+            emissive.push(false);
+            emissive.push(false);
+            colors.push(color);
+            colors.push(color);
+        }
+        for i in 0..sides as u16 {
+            let b = body_base + i * 2;
+            indices.extend_from_slice(&[b, b + 2, b + 1, b + 1, b + 2, b + 3]);
+        }
+
+        // ---- +Z cap ----
+        let cap_pos = positions.len() as u16;
+        positions.push(Vec3::new(0.0, 0.0, half) + offset);
+        uvs.push(Vec2::new(0.5, 0.5));
+        shades.push((0.62 + 0.42 * sun_dot(Vec3::new(0.0, 0.0, 1.0))).clamp(0.42, 1.06));
+        emissive.push(false);
+        colors.push(color);
+        for i in 0..=sides {
+            let a = i as f32 * step;
+            let (sin, cos) = a.sin_cos();
+            positions.push(Vec3::new(sin * radius_top, cos * radius_top, half) + offset);
+            uvs.push(Vec2::new(0.5 + sin * 0.5, 0.5 + cos * 0.5));
+            shades.push((0.62 + 0.42 * sun_dot(Vec3::new(0.0, 0.0, 1.0))).clamp(0.42, 1.06));
+            emissive.push(false);
+            colors.push(color);
+        }
+        for i in 0..sides as u16 {
+            indices.extend_from_slice(&[cap_pos, cap_pos + 1 + i, cap_pos + 2 + i]);
+        }
+
+        // ---- -Z cap ----
+        let cap_neg = positions.len() as u16;
+        positions.push(Vec3::new(0.0, 0.0, -half) + offset);
+        uvs.push(Vec2::new(0.5, 0.5));
+        shades.push(0.45);
+        emissive.push(false);
+        colors.push(color);
+        for i in 0..=sides {
+            let a = i as f32 * step;
+            let (sin, cos) = a.sin_cos();
+            positions.push(Vec3::new(sin * radius_bottom, cos * radius_bottom, -half) + offset);
+            uvs.push(Vec2::new(0.5 + sin * 0.5, 0.5 + cos * 0.5));
+            shades.push(0.45);
+            emissive.push(false);
+            colors.push(color);
+        }
+        for i in 0..sides as u16 {
+            indices.extend_from_slice(&[cap_neg, cap_neg + 2 + i, cap_neg + 1 + i]);
+        }
+
+        PartMesh::from_raw(positions, uvs, shades, emissive, colors, indices)
+    }
+
     /// Bake `world * local` into the reusable mesh and modulate by `ambient` (0..1.1).
     /// Emissive vertices ignore ambient (headlights stay bright at night).
     pub fn write_transformed(&mut self, world: &Mat4, ambient: f32) {
