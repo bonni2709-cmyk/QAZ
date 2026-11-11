@@ -11,10 +11,13 @@ categories = ["games"]
 publish = false
 
 [dependencies]
-macroquad = "0.4.14"
+macroquad = { version = "0.4.14", features = ["audio"] } # "audio" pulls quad-snd (ALSA/OpenSL ES backends)
 # JSON saves / config land in Module 6; wired now so Cargo.lock covers them.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[build-dependencies]
+serde_json = "1" # renders assets/manifest.json into the loading screen's OUT_DIR table
 
 # ---------------------------------------------------------------------------
 # Android packaging metadata (cargo-quad-apk, see .github/workflows/build.yml)

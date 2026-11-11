@@ -14,6 +14,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# cancel superseded runs on the same ref (CI minute hygiene)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
@@ -24,6 +29,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache generated asset pack
+        id: assets-cache
+        uses: actions/cache@v4
+        with:
+          path: assets
+          key: asset-pack-${{ hashFiles('tools/gen_assets.py') }}
+
+      - name: Generate asset pack (tools/gen_assets.py)
+        if: steps.assets-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check numpy pillow
+          python3 tools/gen_assets.py
+
+      - name: Verify asset manifest (real bytes)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          entries = json.load(open('assets/manifest.json'))
+          total = sum(e['bytes'] for e in entries)
+          assert len(entries) >= 10, entries
+          assert total > 40_000_000, f'asset pack suspiciously small: {total}'
+          print(f'asset pack OK: {len(entries)} files, {total / 1e6:.1f} MB total')
+          PY
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -77,6 +107,31 @@ jobs:
           - x86_64-linux-android       # emulator / ChromeOS
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache generated asset pack
+        id: assets-cache
+        uses: actions/cache@v4
+        with:
+          path: assets
+          key: asset-pack-${{ hashFiles('tools/gen_assets.py') }}
+
+      - name: Generate asset pack (tools/gen_assets.py)
+        if: steps.assets-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check numpy pillow
+          python3 tools/gen_assets.py
+
+      - name: Verify asset manifest (real bytes)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          entries = json.load(open('assets/manifest.json'))
+          total = sum(e['bytes'] for e in entries)
+          assert len(entries) >= 10, entries
+          assert total > 40_000_000, f'asset pack suspiciously small: {total}'
+          print(f'asset pack OK: {len(entries)} files, {total / 1e6:.1f} MB total')
+          PY
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -140,6 +195,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache generated asset pack
+        id: assets-cache
+        uses: actions/cache@v4
+        with:
+          path: assets
+          key: asset-pack-${{ hashFiles('tools/gen_assets.py') }}
+
+      - name: Generate asset pack (tools/gen_assets.py)
+        if: steps.assets-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check numpy pillow
+          python3 tools/gen_assets.py
+
+      - name: Verify asset manifest (real bytes)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          entries = json.load(open('assets/manifest.json'))
+          total = sum(e['bytes'] for e in entries)
+          assert len(entries) >= 10, entries
+          assert total > 40_000_000, f'asset pack suspiciously small: {total}'
+          print(f'asset pack OK: {len(entries)} files, {total / 1e6:.1f} MB total')
+          PY
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable

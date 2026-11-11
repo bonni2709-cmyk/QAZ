@@ -17,6 +17,7 @@ use crate::systems::chase::ChaseCamera;
 use crate::systems::director::Director;
 use crate::systems::loot::{LootKind, LootPool};
 use crate::systems::particles::{ParticlePool, TracerPool};
+use crate::systems::assets::AssetBundle;
 use crate::systems::turret::{AmmoKind, TurretState};
 use crate::systems::upgrades::UpgradeState;
 use crate::systems::weather::{Weather, WeatherEvent};
@@ -34,6 +35,7 @@ pub struct DrivingState {
     particles: ParticlePool,
     tracers: TracerPool,
     turret: TurretState,
+    assets: AssetBundle,
     director: Director,
     loot: LootPool,
     upgrades: UpgradeState,
@@ -44,6 +46,10 @@ pub struct DrivingState {
     boss_contact_cd: f32,
     event_banner: f32,
     event_banner_text: &'static str,
+    was_overheated: bool,
+    prev_wb_flash: f32,
+    engine_vol: f32,
+    wind_vol: f32,
     events: EnemyFrameEvents,
     hit_rng: u64,
     time_of_day: f32,
@@ -153,8 +159,8 @@ fn wb_touched() -> bool {
 }
 
 impl DrivingState {
-    pub fn new() -> DrivingState {
-        DrivingState {
+    pub fn new(assets: AssetBundle) -> DrivingState {
+        let mut state = DrivingState {
             truck: Truck::new(),
             camera: ChaseCamera::new(),
             projectiles: ProjectilePool::new(),
@@ -162,6 +168,7 @@ impl DrivingState {
             particles: ParticlePool::new(),
             tracers: TracerPool::new(),
             turret: TurretState::new(),
+            assets,
             director: Director::new(),
             loot: LootPool::new(),
             upgrades: UpgradeState::new(),
@@ -172,6 +179,10 @@ impl DrivingState {
             boss_contact_cd: 0.0,
             event_banner: 0.0,
             event_banner_text: "",
+            was_overheated: false,
+            prev_wb_flash: 0.0,
+            engine_vol: 0.14,
+            wind_vol: 0.0,
             events: EnemyFrameEvents::new(),
             hit_rng: 0xA5A5_5A5A_3C3C_C3C3,
             time_of_day: 0.34, // mid-morning wasteland light
@@ -189,14 +200,23 @@ impl DrivingState {
             hit_timer: 0.0,
             kill_timer: 0.0,
             rocket_warning: false,
-        }
+        };
+        // loops live until the wreck screen or a run reset
+        state.assets.start_loop(&state.assets.music, 0.30);
+        state.assets.start_loop(&state.assets.engine, 0.14);
+        state.assets.start_loop(&state.assets.wind, 0.0);
+        state
     }
 
     /// Full run reset (R). Keeps the session best distance.
     fn reset_run(&mut self) {
         let best = self.best_m;
         let upgrades = self.upgrades.clone(); // session salvage & workbench ranks persist
-        *self = DrivingState::new();
+        let assets = self.assets.clone(); // cheap handle clone
+        self.assets.stop(&self.assets.engine);
+        self.assets.stop(&self.assets.music);
+        self.assets.stop(&self.assets.wind);
+        *self = DrivingState::new(assets);
         self.best_m = best;
         self.upgrades = upgrades;
     }
@@ -259,6 +279,7 @@ impl DrivingState {
     }
 
     fn on_enemy_killed(&mut self, index: usize) {
+        self.assets.explosion(false);
         let Some(enemy) = self.enemies.get(index) else {
             return;
         };
@@ -301,6 +322,7 @@ impl DrivingState {
 
     /// The juggernaut blows: cinematic triple explosion, salvage shower, banner.
     fn on_boss_killed(&mut self) {
+        self.assets.explosion(true);
         let Some(boss) = self.boss.take() else {
             return;
         };
@@ -489,12 +511,17 @@ impl DrivingState {
 
         self.truck.set_turret_yaw(self.turret.yaw);
         self.turret.update(dt);
+        if self.turret.overheated && !self.was_overheated {
+            self.assets.play(&self.assets.overheat, 0.70);
+        }
+        self.was_overheated = self.turret.overheated;
 
         // ---------- firing ----------
         let fire_held = is_mouse_button_down(MouseButton::Left)
             || is_key_down(KeyCode::Space)
             || android_fire_touch();
         if fire_held && self.turret.try_fire() {
+            self.assets.shot(self.turret.ammo == AmmoKind::Incendiary);
             let (muzzle, dir) = self.truck.turret_muzzle();
             let ammo = self.turret.ammo;
             self.projectiles.spawn(
@@ -567,6 +594,7 @@ impl DrivingState {
             let boss_events = boss.update(dt, self.truck.position, self.truck.speed, &mut self.mines);
             if boss_events.mine_dropped {
                 self.camera.add_shake(0.07);
+                self.assets.play(&self.assets.mine_beep, 0.40);
             }
             if boss_events.ramming {
                 // the tanker is shouldering in — the whole hull shudders with it
@@ -589,6 +617,7 @@ impl DrivingState {
                 self.boss_contact_cd = 1.6;
                 self.truck.apply_damage(26.0);
                 self.camera.add_shake(0.5);
+                self.assets.play(&self.assets.ram_crash, 0.85);
             }
         }
         // mines tick on their own clock
@@ -644,6 +673,7 @@ impl DrivingState {
                         }
                         if ricocheted {
                             self.particles.ricochet(pos);
+                            self.assets.play(&self.assets.ricochet, 0.65);
                         } else {
                             self.particles.impact(pos, kind == ProjKind::Incendiary);
                         }
@@ -698,6 +728,7 @@ impl DrivingState {
                         self.truck.apply_damage(total);
                     }
                     self.particles.explosion(pos, 1.15);
+                    self.assets.play(&self.assets.explosion_small, 0.70);
                     let near = 1.0 - (dist / 40.0).clamp(0.0, 1.0);
                     self.camera.add_shake(0.34 + 0.28 * near);
                     self.projectiles.deactivate(i);
@@ -756,6 +787,15 @@ impl DrivingState {
         // ---------- salvage: magnet beam ----------
         let tally = self.loot.update(dt, self.truck.position, self.upgrades.magnet_radius(), &mut self.particles);
         if tally.any() {
+            if tally.scrap > 0 {
+                self.assets.play(&self.assets.pickup_scrap, 0.50);
+            }
+            if tally.repair > 0 {
+                self.assets.play(&self.assets.pickup_medkit, 0.60);
+            }
+            if tally.fuel > 0 {
+                self.assets.play(&self.assets.pickup_scrap, 0.42);
+            }
             self.upgrades.add_scrap(tally.scrap);
             if tally.repair > 0 {
                 self.truck.health = (self.truck.health + tally.repair as f32 * 18.0).min(self.truck.max_health);
@@ -766,16 +806,33 @@ impl DrivingState {
         }
 
         // ---------- hull integrity ----------
-        if self.truck.health <= 0.0 {
+        if self.truck.health <= 0.0 && !self.wrecked {
             self.wrecked = true;
+            // the song dies with the rig
+            self.assets.explosion(true);
+            self.assets.stop(&self.assets.engine);
+            self.assets.stop(&self.assets.music);
+            self.assets.stop(&self.assets.wind);
         }
 
         // ---------- effects ----------
         self.particles.update(dt);
         self.tracers.update(dt);
 
-        // ---------- chase camera ----------
+        // ---------- loop levels follow the world ----------
         let speed_norm = (self.truck.speed / 33.0).clamp(0.0, 1.0);
+        let engine_target = 0.08 + speed_norm * 0.40;
+        if (engine_target - self.engine_vol).abs() > 0.03 {
+            self.engine_vol = engine_target;
+            self.assets.set_volume(&self.assets.engine, engine_target);
+        }
+        let wind_target = storm * 0.55;
+        if (wind_target - self.wind_vol).abs() > 0.03 {
+            self.wind_vol = wind_target;
+            self.assets.set_volume(&self.assets.wind, wind_target);
+        }
+
+        // ---------- chase camera ----------
         self.camera.update(
             self.truck.position,
             self.truck.forward(),
@@ -796,7 +853,13 @@ impl DrivingState {
         // ---------- 3D pass ----------
         clear_background(self.sky_color(biome, storm));
         set_camera(&self.camera.to_camera3d(speed_norm));
-        draw_world(z, ambient);
+        draw_world(
+            z,
+            ambient,
+            self.assets.asphalt.as_ref(),
+            self.assets.sand.as_ref(),
+            self.assets.concrete.as_ref(),
+        );
         self.enemies.draw(ambient);
         if let Some(boss) = &mut self.boss {
             boss.draw(ambient, time);
@@ -898,7 +961,11 @@ impl DrivingState {
 
         if self.workbench_open {
             ui::draw_workbench(&mut self.upgrades, &mut self.wb_flash);
+            if self.wb_flash > 0.0 && self.prev_wb_flash == 0.0 {
+                self.assets.play(&self.assets.workbench, 0.60);
+            }
         }
+        self.prev_wb_flash = self.wb_flash;
 
         if self.wrecked {
             ui::draw_wrecked_overlay(self.distance_m, self.best_m, self.kills, self.upgrades.scrap());

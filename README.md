@@ -9,10 +9,15 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 - **Target hardware:** Infinix Note 30 · Helio G99 · Mali-G57 · 8 GB RAM · 60 FPS
 - **Shipping budget:** **≥ 200 MB** (4K PBR-ish textures, 5-minute WAV industrial track, high-poly models, multi-ABI APK)
 
-> **Honesty note:** Modules 5+ bring the real 4K assets. Until then the loading
-> screen streams a *manifest* whose sizes already sum to ~268 MB — the number
-> on screen is the shipping budget, not recycled dummy data. No fake "200 MB"
-> padding is committed to this repository.
+> **Honesty note:** Module 5 generates a **real build-time pack** with
+> `python3 tools/gen_assets.py` (deterministic seeds, no network): three 4K
+> albedo textures, 14 synthesized SFX and a 5:00 synthesized industrial loop
+> — about **57 MB** of actual, game-loaded bytes. They are real files the game
+> loads and uses — but they are *procedural placeholders*, not hand-painted 4K
+> PBR art or a professionally produced industrial track. The ≥ 200 MB shipping
+> budget still stands; reaching it needs real masters (see Module 6). The
+> loading screen now reports real generated sizes — and when the pack is
+> absent it says so instead of inventing numbers.
 
 ## Module status
 
@@ -22,7 +27,7 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 | 2 | Combat: 360° turret, overheating, AP/incendiary ammo, bikers/buggies/armored cars, tracers, 3D-part debris | **DONE — this branch** |
 | 3 | Looting on the move (magnet beam, wheeled workbench, turret/armor/engine upgrades) | **DONE — this branch** |
 | 4 | Weather & lighting (day/night done early, sandstorms), Boss #1: tanker truck | **DONE — this branch** |
-| 5 | Heavy assets: 4K textures, WAV audio, 5-min track, multi-arch CI polish | planned |
+| 5 | Heavy assets: 4K textures, WAV audio, 5-min track, multi-arch CI polish | **DONE — this branch (procedural build-time pack)** |
 | 6 | UI/menus, JSON saves, APK packaging, icon | planned |
 | 7 | On-foot scavenging: outposts, safes, tool minis (angle grinder / screwdriver) | planned |
 | 8 | Factions, global bosses (crawler worm, bomber drones), New Game+, Codex | planned |
@@ -48,8 +53,8 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 - **HUD** (macroquad immediate mode): HULL / FUEL / TURRET TEMP bars, big
   speedometer, distance + session best, biome chip, biome-transition banner,
   FPS readout, Android touch zones with AUTO-GAS.
-- **Loading screen**: 3D truck turntable + asset-stream bar (~268 MB manifest),
-  hold SPACE/TAP to fast-forward.
+- **Loading screen**: 3D truck turntable + asset-stream bar (real build-time
+  manifest since Module 5 — see below), hold SPACE/TAP to fast-forward.
 - **Code health**: no `unwrap()` anywhere, zero per-frame heap traffic for
   rendering (parts re-bake into reused vertex buffers), deterministic world
   (stable across sessions), unit tests for the PRNG/biome bands.
@@ -129,6 +134,41 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 - Day/night cycle (4-minute day) was already in place; storms layer on top of
   it, no art assets required.
 
+## Module 5 — what's inside
+
+- **Build-time asset pack** (`tools/gen_assets.py`, deterministic seeds, no
+  network): `textures/asphalt_4k.jpg` (road), `textures/sand_4k.jpg`
+  (wasteland/swamp ground, per-biome tinted), `textures/concrete_4k.jpg`
+  (ruined-city ground) — plus 14 synthesized SFX (engine loop, storm-wind loop,
+  AP/incendiary shots, explosions, ricochet, pickups, overheat alarm, mine
+  beep, ram crash, workbench ding) and **`music/industry_legend_5min.wav`** —
+  a synthesized 5:00, 100 BPM industrial loop in A minor (~52.9 MB; NOT a
+  mastered production). Pack ≈ **57 MB**, git-ignored, produced on every build
+  by CI (cached on the generator's hash).
+- **Loading screen streams the *real* pack**: `build.rs` renders
+  `assets/manifest.json` (real paths + real on-disk bytes) into the binary;
+  the bar is driven by the actual bytes the macroquad file IO delivers via a
+  loader coroutine — not a simulation. Empty pack? The screen says
+  `NO ASSET PACK FOUND — RUN python3 tools/gen_assets.py` instead of lying.
+- **Audio is wired into gameplay**: engine loop (volume follows speed), storm
+  wind (gain follows sandstorm intensity), music loop on run start, shots,
+  ricochets, explosions (small on kills, big on wrecks/boss), overheat alarm,
+  pickup chimes, mine beep, ram crash, workbench purchase ding. The wreck
+  screen stops engine + music — the song dies with the rig. Restarting
+  (`R`) or finishing the load re-arms the loops cleanly (no doubling).
+- **World textures**: road plane samples the asphalt albedo; ground slab
+  samples sand (wasteland + storm-tinted swamp) or concrete (ruined city).
+  Without the pack the renderer falls back to the original vertex colors.
+- **CI polish (multi-arch)**: top-level `concurrency` cancel-in-progress; the
+  asset pack is generated and integrity-checked (real-byte manifest ≥ 40 MB) on
+  **every** job — desktop, all three Android ABIs, and the manual APK job;
+  pack cached on the generator's hash. APKs/artifacts now really contain the
+  game's audio + textures.
+- **Honesty ledger**: the ≥ 200 MB shipping budget still needs real masters —
+  painted 4K PBR sets, a mastered industrial track, high-poly models. This
+  module proves the *pipeline* end-to-end with procedural placeholders and
+  makes every size on screen real; it does not claim artistic production.
+
 ## Controls
 
 | Desktop | Android |
@@ -190,11 +230,14 @@ src/
     loot.rs             — pooled salvage pickups, magnet beam pull, beacons
     upgrades.rs         — scrap economy, 4 workbench tracks (3 ranks each)
     weather.rs          — sandstorm cycle (roll, gusts, banners)
+    assets.rs           — runtime bundle: manifest, loader coroutine, playback
   ui/
     hud.rs              — bars, speedometer, banners, letterbox/vignette
     workbench.rs        — wheeled-workbench upgrade panel (TAB/WB)
-assets/                 — textures/ audio/ models/ music/ (Module 5)
-.github/workflows/      — desktop + Android ABI CI, manual APK job
+build.rs                — renders assets/manifest.json → loading-screen table
+tools/gen_assets.py     — deterministic build-time pack generator (git-ignored output)
+assets/                 — generated at build (git-ignored): textures/ audio/ music/
+.github/workflows/      — desktop + Android ABI CI, manual APK job, asset-pack cache
 ```
 
 ## License

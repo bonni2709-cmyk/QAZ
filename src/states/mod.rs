@@ -1,7 +1,7 @@
 //! Game states & the tiny app state-machine that drives them.
 //!
-//! Module 1 ships two states: `Loading` → `Driving`. Module 6 turns this into
-//! the full menu / garage / pause stack; nothing here pre-decides its shape.
+//! Two states for now: `Loading` → `Driving` (Module 6 turns this into the
+//! full menu / garage / pause stack; nothing here pre-decides its shape).
 
 pub mod driving;
 pub mod loading;
@@ -43,7 +43,13 @@ impl App {
             }
         };
         if finished_loading {
-            self.state = GameState::Driving(DrivingState::new());
+            match &mut self.state {
+                GameState::Loading(loading) => {
+                    let bundle = loading.take_bundle();
+                    self.state = GameState::Driving(DrivingState::new(bundle));
+                }
+                GameState::Driving(_) => {}
+            }
         }
     }
 }

@@ -9,3 +9,11 @@ local.properties
 *.jks
 target/android-artifacts/
 .DS_Store
+
+# Module 5: asset pack is generated at build time by tools/gen_assets.py
+/assets/manifest.json
+/assets/textures/*
+/assets/audio/*
+/assets/music/*
+/assets/models/*
+!**/.gitkeep

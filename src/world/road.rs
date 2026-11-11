@@ -115,14 +115,29 @@ pub fn haze_color(biome: Biome, ambient: f32) -> Color {
 
 /// Draw the ground + asphalt + markings + props for all visible chunks.
 /// `ambient` ∈ [0, 1.05] — scales every static color (cheap fake lighting).
-pub fn draw_world(center_z: f32, ambient: f32) {
+/// When the Module 5 pack was generated, the ground planes sample real 4K
+/// albedos (sand tinted per-biome, concrete in the ruined city, asphalt on the
+/// road); otherwise they fall back to the baked vertex colors.
+pub fn draw_world(
+    center_z: f32,
+    ambient: f32,
+    asphalt: Option<&Texture2D>,
+    sand: Option<&Texture2D>,
+    concrete: Option<&Texture2D>,
+) {
     let first = (center_z / CHUNK_LEN).floor() as i64 - 1;
     for i in first..first + VIEW_CHUNKS {
-        draw_chunk(i, ambient);
+        draw_chunk(i, ambient, asphalt, sand, concrete);
     }
 }
 
-fn draw_chunk(index: i64, ambient: f32) {
+fn draw_chunk(
+    index: i64,
+    ambient: f32,
+    asphalt: Option<&Texture2D>,
+    sand: Option<&Texture2D>,
+    concrete: Option<&Texture2D>,
+) {
     let z0 = index as f32 * CHUNK_LEN;
     let zc = z0 + CHUNK_LEN * 0.5;
     let biome = biome_at(zc);
@@ -130,20 +145,45 @@ fn draw_chunk(index: i64, ambient: f32) {
     let amb = ambient.clamp(0.0, 1.0);
 
     // ---- ground slab (wide, cheap, one plane per chunk) ----
-    draw_plane(
-        vec3(0.0, 0.0, zc),
-        vec2(90.0, CHUNK_LEN * 0.5),
-        None,
-        shaded(sand_color(biome), amb),
-    );
+    let (ground_tex, ground_tint) = match biome {
+        Biome::ToxicSwamp => (sand, Color::new(amb * 0.55, amb * 0.78, amb * 0.45, 1.0)),
+        Biome::RuinedCity => (concrete, Color::new(amb, amb, amb, 1.0)),
+        Biome::Wasteland => (sand, Color::new(amb, amb, amb, 1.0)),
+    };
+    match ground_tex {
+        Some(tex) => {
+            draw_plane(vec3(0.0, 0.0, zc), vec2(90.0, CHUNK_LEN * 0.5), Some(tex), ground_tint);
+        }
+        None => {
+            draw_plane(
+                vec3(0.0, 0.0, zc),
+                vec2(90.0, CHUNK_LEN * 0.5),
+                None,
+                shaded(sand_color(biome), amb),
+            );
+        }
+    }
 
     // ---- asphalt ----
-    draw_plane(
-        vec3(0.0, 0.03, zc),
-        vec2(ROAD_HALF, CHUNK_LEN * 0.5),
-        None,
-        shaded(asphalt_color(), (amb * 0.9 + 0.08).min(1.0)),
-    );
+    let asphalt_amb = (amb * 0.9 + 0.08).min(1.0);
+    match asphalt {
+        Some(tex) => {
+            draw_plane(
+                vec3(0.0, 0.03, zc),
+                vec2(ROAD_HALF, CHUNK_LEN * 0.5),
+                Some(tex),
+                Color::new(asphalt_amb, asphalt_amb, asphalt_amb, 1.0),
+            );
+        }
+        None => {
+            draw_plane(
+                vec3(0.0, 0.03, zc),
+                vec2(ROAD_HALF, CHUNK_LEN * 0.5),
+                None,
+                shaded(asphalt_color(), asphalt_amb),
+            );
+        }
+    }
 
     // ---- edge lines ----
     let line = shaded(Color::new(0.82, 0.78, 0.58, 1.0), amb);
