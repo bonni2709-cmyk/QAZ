@@ -236,7 +236,13 @@ CI (`.github/workflows/build.yml`):
 - `android` — release cross-compile of all three ABIs the Note 30 may need
   (`aarch64-linux-android` primary, `armv7-linux-androideabi`, `x86_64-linux-android`)
   using the NDK preinstalled on GitHub runners;
-- `apk` — manual `workflow_dispatch` job, produces a debug-signed APK via `cargo-quad-apk`.
+- `apk` — manual `workflow_dispatch` job, produces a debug-signed APK via `cargo-quad-apk`
+  (icon + five-density mipmaps wired, asset pack generated and packaged inside).
+  **Not yet dispatched**: the CI integration used for this branch cannot trigger
+  `workflow_dispatch` (HTTP 403), so the APK itself has not been produced yet.
+  Everything up to the APK boundary is CI-green (all three Android ABIs
+  cross-compile with the audio backend + icon resources). Run the job once from
+  the Actions tab to mint the first APK artifact.
 
 ## Project layout
 
