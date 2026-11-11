@@ -1,7 +1,8 @@
 //! RAILGUN PURSUIT 3D — hardcore 3D run-and-gun & survival.
 //!
-//! Module 1 scope: 3D core, chase-camera truck physics, procedural road with
-//! biome rotation, loading screen, HUD. No combat yet (Module 2).
+//! State flow: Loading → Menu → Driving (menu abandons/resumes runs).
+//! Scope landed through Module 6: 3D core, turret combat, loot economy,
+//! sandstorms & the JUGGERNAUT, build-time asset pack, menus & JSON saves.
 
 mod entities;
 mod states;

@@ -219,7 +219,7 @@ impl LoadingState {
         );
 
         // ---------- footer ----------
-        let foot = "MODULE 5 · BUILD-TIME ASSET PACK (PROCEDURAL) — TARGET 60 FPS · INFINIX NOTE 30";
+        let foot = "MODULE 6 · BUILD-TIME ASSET PACK (PROCEDURAL) · JSON SAVES — TARGET 60 FPS · INFINIX NOTE 30";
         let foot_dim = measure_text(foot, None, 15, 1.0);
         draw_text(
             foot,

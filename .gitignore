@@ -17,3 +17,6 @@ target/android-artifacts/
 /assets/music/*
 /assets/models/*
 !**/.gitkeep
+
+# local asset-generation venv (persists in workspace, never committed)
+/.assetvenv/

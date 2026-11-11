@@ -15,9 +15,10 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 > — about **57 MB** of actual, game-loaded bytes. They are real files the game
 > loads and uses — but they are *procedural placeholders*, not hand-painted 4K
 > PBR art or a professionally produced industrial track. The ≥ 200 MB shipping
-> budget still stands; reaching it needs real masters (see Module 6). The
-> loading screen now reports real generated sizes — and when the pack is
-> absent it says so instead of inventing numbers.
+> budget still stands; the master list that gets us there lives in
+> `assets/PLANNED_MASTERS.md` (nothing in it is committed or claimed). The
+> loading screen reports real generated sizes — and when the pack is absent it
+> says so instead of inventing numbers.
 
 ## Module status
 
@@ -28,7 +29,7 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 | 3 | Looting on the move (magnet beam, wheeled workbench, turret/armor/engine upgrades) | **DONE — this branch** |
 | 4 | Weather & lighting (day/night done early, sandstorms), Boss #1: tanker truck | **DONE — this branch** |
 | 5 | Heavy assets: 4K textures, WAV audio, 5-min track, multi-arch CI polish | **DONE — this branch (procedural build-time pack)** |
-| 6 | UI/menus, JSON saves, APK packaging, icon | planned |
+| 6 | UI/menus, JSON saves, APK packaging, icon | **DONE — this branch** |
 | 7 | On-foot scavenging: outposts, safes, tool minis (angle grinder / screwdriver) | planned |
 | 8 | Factions, global bosses (crawler worm, bomber drones), New Game+, Codex | planned |
 
@@ -169,6 +170,37 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
   module proves the *pipeline* end-to-end with procedural placeholders and
   makes every size on screen real; it does not claim artistic production.
 
+## Module 6 — what's inside
+
+- **Main menu** (Loading → **Menu** → Driving): the war rig idles on the
+  turntable behind the title; `ENTER` / `SPACE` / tap rolls out (half-second
+  input grace so clicks can't skip through). A *service record* strip reads
+  straight off the save file: best distance, scrap bank, total runs, total
+  kills — the menu is the proof persistence is real.
+- **JSON saves** (`systems/savegame.rs`): `railgun_pursuit_save.json` —
+  versioned `SaveData` (best distance, scrap, 4 upgrade ranks, career runs/
+  kills). Search order: `$RAILGUN_SAVE_PATH` → beside the exe → CWD → temp
+  dir. Missing file ⇒ fresh profile; corrupt file ⇒ fresh profile with a
+  stderr note (the file is left untouched for manual recovery); write
+  failure ⇒ the run continues unsaved. Save flushes: on wreck (career
+  counters), on workbench purchase, on run reset / menu abandon, and a 5 s
+  debounce when dirty. Upgrades restore across sessions. Android note: the
+  sandbox may make every location unwritable — then saves fail soft by
+  design (see Honesty note).
+- **Pause & WRECKED screens**: `M` abandons the run (saves, back to menu);
+  WRECKED now hints `R — ROLL OUT AGAIN · M — MAIN MENU`. Pause footer
+  updated to Module 6.
+- **APK packaging**: `android_res/mipmap-*/ic_launcher.png` (five densities,
+  wired via `res` + `icon = "@mipmap/ic_launcher"` in `Cargo.toml`;
+  `version_code` 6, `version_name` `0.1.0-module6`). The launcher icon is a
+  **procedural placeholder** (`tools/gen_icon.py` — geometric war-rig front,
+  no text) — honest, installable, replaceable by artist masters. The manual
+  `apk` CI job builds the APK; the generated asset pack ships inside it.
+- **The ≥ 200 MB ledger**: `assets/PLANNED_MASTERS.md` — itemized
+  ≈ 430 MB of masters (audio / 4K PBR texture sets / high-poly GLBs) that
+  would replace the procedural placeholders. Not committed, not claimed — it
+  is the purchase order for a real release.
+
 ## Controls
 
 | Desktop | Android |
@@ -179,7 +211,7 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 | `1` / `2` / `Q` ammo (AP / incendiary / cycle) | tap chips (planned UI) / `Q` equivalent |
 | `TAB` wheeled workbench (buy upgrades) | `WB` button |
 | `R` reset run | same via pause overlay |
-| `Esc` pause | Android back button / pause |
+| `Esc` pause · `M` abandon run to menu (paused / wrecked) | Android back button / pause |
 | hold `Space` / click on loading = fast-forward | tap & hold anywhere |
 
 ## Build & run
@@ -211,8 +243,9 @@ CI (`.github/workflows/build.yml`):
 ```
 src/
   main.rs               — entry point, state machine bootstrap
-  states/               — app state machine (Loading → Driving)  [menu/garage in Module 6]
-    loading.rs          — 200+ MB asset-stream loading screen
+  states/               — app state machine (Loading → Menu → Driving)
+    loading.rs          — build-time asset-stream loading screen
+    menu.rs             — main menu + service record (reads the JSON save)
     driving.rs          — the endless-highway run
   entities/
     truck.rs            — the war rig (build, physics, draw)
@@ -231,12 +264,15 @@ src/
     upgrades.rs         — scrap economy, 4 workbench tracks (3 ranks each)
     weather.rs          — sandstorm cycle (roll, gusts, banners)
     assets.rs           — runtime bundle: manifest, loader coroutine, playback
+    savegame.rs         — JSON save game (versioned SaveData, atomic-ish paths)
   ui/
     hud.rs              — bars, speedometer, banners, letterbox/vignette
     workbench.rs        — wheeled-workbench upgrade panel (TAB/WB)
 build.rs                — renders assets/manifest.json → loading-screen table
 tools/gen_assets.py     — deterministic build-time pack generator (git-ignored output)
 assets/                 — generated at build (git-ignored): textures/ audio/ music/
+  PLANNED_MASTERS.md    — the ≥200 MB master-asset purchase order (not in repo)
+android_res/            — launcher icons, five densities (procedural placeholder)
 .github/workflows/      — desktop + Android ABI CI, manual APK job, asset-pack cache
 ```
 

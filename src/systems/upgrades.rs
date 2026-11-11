@@ -5,8 +5,8 @@
 //! them to the truck / turret / magnet, which keeps the dependency arrow
 //! one-way (UI & driving → entities).
 //!
-//! Upgrades and scrap persist for the session (run resets keep them); real
-//! saves land with the JSON system in Module 6.
+//! Upgrades and scrap persist across sessions via the JSON save system
+//! (Module 6, `systems::savegame`) — see `snapshot()` / `restore()`.
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum UpgradeTrack {
@@ -157,5 +157,51 @@ impl UpgradeState {
 
     pub fn magnet_radius(&self) -> f32 {
         6.0 + self.magnet as f32 * 2.4
+    }
+
+    /// Snapshot for the JSON save: (scrap bank, [armor, turret, engine, magnet] ranks).
+    pub fn snapshot(&self) -> (u32, [u8; 4]) {
+        (self.scrap, [self.armor, self.turret, self.engine, self.magnet])
+    }
+
+    /// Rebuild from a save file. Ranks are clamped to MAX_LEVEL.
+    pub fn restore(scrap: u32, ranks: [u8; 4]) -> UpgradeState {
+        UpgradeState {
+            armor: ranks[0].min(MAX_LEVEL),
+            turret: ranks[1].min(MAX_LEVEL),
+            engine: ranks[2].min(MAX_LEVEL),
+            magnet: ranks[3].min(MAX_LEVEL),
+            scrap,
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_restore_roundtrip() {
+        let mut state = UpgradeState::new();
+        state.add_scrap(340);
+        assert!(state.buy(UpgradeTrack::Armor));
+        assert!(state.buy(UpgradeTrack::Magnet));
+        assert!(state.buy(UpgradeTrack::Magnet));
+        let (scrap, ranks) = state.snapshot();
+        let restored = UpgradeState::restore(scrap, ranks);
+        assert_eq!(restored.scrap(), scrap);
+        assert_eq!(restored.level(UpgradeTrack::Armor), 1);
+        assert_eq!(restored.level(UpgradeTrack::Magnet), 2);
+        assert_eq!(restored.level(UpgradeTrack::Turret), 0);
+    }
+
+    #[test]
+    fn restore_clamps_foreign_ranks() {
+        let restored = UpgradeState::restore(0, [250, 9, 7, 4]);
+        assert_eq!(restored.level(UpgradeTrack::Armor), MAX_LEVEL);
+        assert_eq!(restored.level(UpgradeTrack::Turret), MAX_LEVEL);
+        assert_eq!(restored.level(UpgradeTrack::Engine), MAX_LEVEL);
+        assert_eq!(restored.level(UpgradeTrack::Magnet), MAX_LEVEL);
     }
 }

@@ -363,10 +363,11 @@ pub fn draw_pause_overlay() {
     let lines = [
         "ESC / BACK — RESUME",
         "R — RESTART RUN",
+        "M — ABANDON RUN (saves, main menu)",
         "1 / 2 — SWAP AMMO (AP / INCENDIARY)",
         "TAB — WHEELED WORKBENCH (upgrades)",
         "",
-        "MODULE 4 · STORMS & THE JUGGERNAUT",
+        "MODULE 6 · UI, MENUS & JSON SAVES",
     ];
     let mut y = sh * 0.50;
     for line in lines {
@@ -513,7 +514,7 @@ pub fn draw_wrecked_overlay(distance_m: f32, best_m: f32, kills: u32, scrap: u32
         );
     }
 
-    let prompt = "PRESS R TO ROLL OUT AGAIN";
+    let prompt = "R — ROLL OUT AGAIN   ·   M — MAIN MENU";
     let blink = (get_time() * 2.6).sin() > -0.25;
     if blink {
         let dim = measure_text(prompt, None, 23, 1.0);

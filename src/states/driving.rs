@@ -18,6 +18,7 @@ use crate::systems::director::Director;
 use crate::systems::loot::{LootKind, LootPool};
 use crate::systems::particles::{ParticlePool, TracerPool};
 use crate::systems::assets::AssetBundle;
+use crate::systems::savegame::{self, SaveData};
 use crate::systems::turret::{AmmoKind, TurretState};
 use crate::systems::upgrades::UpgradeState;
 use crate::systems::weather::{Weather, WeatherEvent};
@@ -50,6 +51,10 @@ pub struct DrivingState {
     prev_wb_flash: f32,
     engine_vol: f32,
     wind_vol: f32,
+    save: SaveData,
+    save_dirty: bool,
+    save_flush_timer: f32,
+    abandon_requested: bool,
     events: EnemyFrameEvents,
     hit_rng: u64,
     time_of_day: f32,
@@ -160,6 +165,8 @@ fn wb_touched() -> bool {
 
 impl DrivingState {
     pub fn new(assets: AssetBundle) -> DrivingState {
+        let save = savegame::load();
+        let upgrades = UpgradeState::restore(save.scrap, [save.armor, save.turret, save.engine, save.magnet]);
         let mut state = DrivingState {
             truck: Truck::new(),
             camera: ChaseCamera::new(),
@@ -171,7 +178,7 @@ impl DrivingState {
             assets,
             director: Director::new(),
             loot: LootPool::new(),
-            upgrades: UpgradeState::new(),
+            upgrades,
             weather: Weather::new(),
             boss: None,
             mines: MinePool::new(),
@@ -183,11 +190,15 @@ impl DrivingState {
             prev_wb_flash: 0.0,
             engine_vol: 0.14,
             wind_vol: 0.0,
+            save,
+            save_dirty: false,
+            save_flush_timer: 0.0,
+            abandon_requested: false,
             events: EnemyFrameEvents::new(),
             hit_rng: 0xA5A5_5A5A_3C3C_C3C3,
             time_of_day: 0.34, // mid-morning wasteland light
             distance_m: 0.0,
-            best_m: 0.0,
+            best_m: save.best_m,
             kills: 0,
             biome_band: biome_at(0.0).band_index(),
             banner_timer: 3.2,
@@ -208,16 +219,46 @@ impl DrivingState {
         state
     }
 
-    /// Full run reset (R). Keeps the session best distance.
-    fn reset_run(&mut self) {
-        let best = self.best_m;
-        let upgrades = self.upgrades.clone(); // session salvage & workbench ranks persist
-        let assets = self.assets.clone(); // cheap handle clone
+    /// Fold the live session into the JSON save and flush it to disk.
+    /// `run_finished` bumps the career counters (called on the wreck transition).
+    fn persist_save(&mut self, run_finished: bool) {
+        let (scrap, ranks) = self.upgrades.snapshot();
+        self.save.scrap = scrap;
+        self.save.armor = ranks[0];
+        self.save.turret = ranks[1];
+        self.save.engine = ranks[2];
+        self.save.magnet = ranks[3];
+        self.save.best_m = self.best_m;
+        if run_finished {
+            self.save.total_runs = self.save.total_runs.saturating_add(1);
+            self.save.total_kills = self.save.total_kills.saturating_add(self.kills as u64);
+        }
+        self.save_dirty = false;
+        self.save_flush_timer = 0.0;
+        let _ = savegame::store(&self.save);
+    }
+
+    fn stop_loops(&self) {
         self.assets.stop(&self.assets.engine);
         self.assets.stop(&self.assets.music);
         self.assets.stop(&self.assets.wind);
+    }
+
+    /// True when the player asked to bail out to the main menu (M while paused/wrecked).
+    pub fn take_menu_request(&mut self) -> bool {
+        std::mem::take(&mut self.abandon_requested)
+    }
+
+    /// Full run reset (R). Keeps the session best distance.
+    fn reset_run(&mut self) {
+        self.persist_save(false);
+        let save = self.save.clone(); // career counters survive the reset
+        let upgrades = self.upgrades.clone();
+        let assets = self.assets.clone(); // cheap handle clone
+        self.stop_loops();
         *self = DrivingState::new(assets);
-        self.best_m = best;
+        self.save = save; // new() reloads from disk anyway; keep counters identical
+        self.best_m = self.save.best_m;
         self.upgrades = upgrades;
     }
 
@@ -365,6 +406,12 @@ impl DrivingState {
 
         if is_key_pressed(KeyCode::R) {
             self.reset_run();
+            return;
+        }
+        if is_key_pressed(KeyCode::M) && (self.wrecked || self.paused) {
+            self.persist_save(false);
+            self.stop_loops();
+            self.abandon_requested = true;
             return;
         }
 
@@ -787,6 +834,7 @@ impl DrivingState {
         // ---------- salvage: magnet beam ----------
         let tally = self.loot.update(dt, self.truck.position, self.upgrades.magnet_radius(), &mut self.particles);
         if tally.any() {
+            self.save_dirty = true;
             if tally.scrap > 0 {
                 self.assets.play(&self.assets.pickup_scrap, 0.50);
             }
@@ -810,9 +858,16 @@ impl DrivingState {
             self.wrecked = true;
             // the song dies with the rig
             self.assets.explosion(true);
-            self.assets.stop(&self.assets.engine);
-            self.assets.stop(&self.assets.music);
-            self.assets.stop(&self.assets.wind);
+            self.stop_loops();
+            self.persist_save(true);
+        }
+
+        // ---------- save flush (debounced: at most one write per 5 s, only when dirty) ----------
+        if self.save_dirty {
+            self.save_flush_timer += dt;
+            if self.save_flush_timer >= 5.0 {
+                self.persist_save(false);
+            }
         }
 
         // ---------- effects ----------
@@ -963,6 +1018,7 @@ impl DrivingState {
             ui::draw_workbench(&mut self.upgrades, &mut self.wb_flash);
             if self.wb_flash > 0.0 && self.prev_wb_flash == 0.0 {
                 self.assets.play(&self.assets.workbench, 0.60);
+                self.persist_save(false);
             }
         }
         self.prev_wb_flash = self.wb_flash;
