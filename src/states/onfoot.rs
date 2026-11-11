@@ -77,6 +77,29 @@ fn wrap_angle(a: f32) -> f32 {
     x
 }
 
+fn xorshift64(x: u64) -> u64 {
+    let mut x = x;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    x
+}
+
+/// Find a free shot slot and drop a round on it (free fn so callers can pass
+/// `&mut self.shots` while borrowing other fields of `self`).
+fn spawn_shot(shots: &mut [Option<SkiffShot>; 8], from: Vec3, vel: Vec3) {
+    for slot in shots.iter_mut() {
+        if slot.is_none() {
+            *slot = Some(SkiffShot {
+                pos: from,
+                vel,
+                life: 3.6,
+            });
+            return;
+        }
+    }
+}
+
 fn site_hash(mut x: u64) -> u64 {
     x ^= x >> 33;
     x = x.wrapping_mul(0xff51_afd7_ed55_8ccd);
@@ -339,15 +362,6 @@ impl OnFoot {
         }
     }
 
-    fn xorshift(&mut self) -> u64 {
-        let mut x = self.rng;
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        self.rng = x;
-        x
-    }
-
     fn exfil_pos(&self) -> Vec3 {
         self.layout.exfil
     }
@@ -393,19 +407,6 @@ impl OnFoot {
             medkits: self.bag_medkits,
             blacked_out: false,
         });
-    }
-
-    fn spawn_shot(&mut self, from: Vec3, vel: Vec3) {
-        for slot in self.shots.iter_mut() {
-            if slot.is_none() {
-                *slot = Some(SkiffShot {
-                    pos: from,
-                    vel,
-                    life: 3.6,
-                });
-                return;
-            }
-        }
     }
 
     pub fn update(&mut self, dt: f32, assets: &AssetBundle) {
@@ -577,7 +578,6 @@ impl OnFoot {
         }
 
         // ---------- marauder skiffs ----------
-        let eye = vec3(0.0, 1.0, 0.0);
         for skiff in self.skiffs.iter_mut() {
             skiff.angle += 0.185 * dt;
             skiff.cooldown -= dt;
@@ -585,15 +585,21 @@ impl OnFoot {
                 skiff.telegraph -= dt;
                 if skiff.telegraph <= 0.0 {
                     let pos = skiff.position();
-                    let target = self.player + eye;
+                    let target = self.player + vec3(0.0, 1.15, 0.0);
                     let dir = target - pos;
                     let len = dir.length();
+                    // field-split: roll the dice on `self.rng`, spawn into
+                    // `self.shots` — no whole-`self` borrow while `skiffs` is live
+                    self.rng = xorshift64(self.rng);
+                    let r1 = self.rng;
+                    self.rng = xorshift64(self.rng);
+                    let r2 = self.rng;
                     if len > 0.1 {
-                        let jitter = 0.94 + (self.xorshift() % 100) as f32 * 0.0012;
-                        self.spawn_shot(pos, (dir / len) * (23.0 * jitter));
+                        let jitter = 0.94 + (r1 % 100) as f32 * 0.0012;
+                        spawn_shot(&mut self.shots, pos, (dir / len) * (23.0 * jitter));
                         assets.play(&assets.shot_inc, 0.35);
                     }
-                    skiff.cooldown = 5.0 + (self.xorshift() % 1000) as f32 * 0.004;
+                    skiff.cooldown = 5.0 + (r2 % 1000) as f32 * 0.004;
                 }
             } else if skiff.cooldown <= 0.0 {
                 skiff.telegraph = 0.85;
@@ -607,7 +613,7 @@ impl OnFoot {
             };
             shot.pos += shot.vel * dt;
             shot.life -= dt;
-            let dist = (shot.pos - (self.player + eye)).length();
+            let dist = (shot.pos - (self.player + vec3(0.0, 1.15, 0.0))).length();
             let ground = shot.pos.y <= 0.12;
             if dist < 1.15 {
                 self.nerve -= 13.0;
@@ -710,7 +716,7 @@ impl OnFoot {
             if self.interact[i].done {
                 continue;
             }
-            pile.write_transformed(&Mat4::IDENTITY, a);
+            pile.write_transformed(&Mat4::from_translation(Vec3::ZERO), a);
             pile.draw();
         }
 
@@ -719,7 +725,7 @@ impl OnFoot {
             if self.interact[PILE_COUNT + i].done {
                 continue;
             }
-            crate_mesh.write_transformed(&Mat4::IDENTITY, a);
+            crate_mesh.write_transformed(&Mat4::from_translation(Vec3::ZERO), a);
             crate_mesh.draw();
         }
 
