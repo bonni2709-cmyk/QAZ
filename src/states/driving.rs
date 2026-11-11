@@ -200,8 +200,6 @@ fn android_fire_touch() -> bool {
     false
 }
 
-/// Android WORKBENCH toggle button (tap = toggle, not hold).
-#[cfg(target_os = "android")]
 /// Android BAIL-OUT hold: button only works (and is drawn) near a ruin site.
 #[cfg(target_os = "android")]
 fn bail_touch_held() -> bool {
@@ -220,6 +218,8 @@ fn bail_touch_held() -> bool {
     false
 }
 
+/// Android WORKBENCH toggle button (tap = toggle, not hold).
+#[cfg(target_os = "android")]
 fn wb_touched() -> bool {
     let (cx, cy, r) = crate::ui::wb_button_center();
     touches().iter().any(|t| {
