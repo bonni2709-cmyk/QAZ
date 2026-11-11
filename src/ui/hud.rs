@@ -403,6 +403,12 @@ pub fn wb_button_center() -> (f32, f32, f32) {
     (96.0, 196.0, 34.0)
 }
 
+/// Android BAIL-OUT button geometry — only drawn while a ruin site is in reach.
+#[cfg(target_os = "android")]
+pub fn bail_button_center() -> (f32, f32, f32) {
+    (96.0, 268.0, 34.0)
+}
+
 /// Center crosshair + hit / kill markers.
 /// `hit_t`, `kill_t` ∈ [0,1] — remaining flash intensity.
 pub fn draw_crosshair(overheated: bool, hit_t: f32, kill_t: f32) {

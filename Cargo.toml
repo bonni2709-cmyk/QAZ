@@ -26,8 +26,8 @@ serde_json = "1" # renders assets/manifest.json into the loading screen's OUT_DI
 assets = "assets/"
 res = "android_res"
 icon = "@mipmap/ic_launcher"
-version_code = 6
-version_name = "0.1.0-module6"
+version_code = 7
+version_name = "0.1.0-module7"
 build_targets = [
     "armv7-linux-androideabi",
     "aarch64-linux-android",

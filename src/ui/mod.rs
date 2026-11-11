@@ -9,4 +9,4 @@ pub use hud::{
 pub use workbench::draw_workbench;
 
 #[cfg(target_os = "android")]
-pub use hud::{fire_button_center, wb_button_center};
+pub use hud::{bail_button_center, fire_button_center, wb_button_center};

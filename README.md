@@ -1,8 +1,8 @@
 # RAILGUN PURSUIT 3D
 
 **Hardcore 3D run-and-gun & survival** — you drive a war rig across a dying
-highway: outgun biker gangs, loot caravans, upgrade the truck, and (from
-Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
+highway: outgun biker gangs, loot caravans, upgrade the truck, and bail out
+on foot to scavenge ruins while marauders circle the rig.
 
 - **Engine:** [macroquad](https://macroquad.rs/) 0.4 (3D, immediate mode)
 - **Language:** Rust (2021 edition; no `unsafe` anywhere in the crate)
@@ -30,7 +30,7 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 | 4 | Weather & lighting (day/night done early, sandstorms), Boss #1: tanker truck | **DONE — this branch** |
 | 5 | Heavy assets: 4K textures, WAV audio, 5-min track, multi-arch CI polish | **DONE — this branch (procedural build-time pack)** |
 | 6 | UI/menus, JSON saves, APK packaging, icon | **DONE — this branch** |
-| 7 | On-foot scavenging: outposts, safes, tool minis (angle grinder / screwdriver) | planned |
+| 7 | On-foot scavenging: ruin sites, NERVE, marauder skiffs, safes, tool minis (angle grinder / screwdriver) | **DONE — this branch** |
 | 8 | Factions, global bosses (crawler worm, bomber drones), New Game+, Codex | planned |
 
 ## Module 1 — what's inside
@@ -201,7 +201,7 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
   would replace the procedural placeholders. Not committed, not claimed — it
   is the purchase order for a real release.
 
-## Controls
+| 7 | On-foot scavenging: ruin sites, NERVE, marauder skiffs, safes, tool minis (angle grinder / screwdriver) | **DONE — this branch** |
 
 | Desktop | Android |
 |---------|---------|
@@ -212,6 +212,8 @@ Module 7) bail out on foot to scavenge ruins while marauders circle the rig.
 | `TAB` wheeled workbench (buy upgrades) | `WB` button |
 | `R` reset run | same via pause overlay |
 | `Esc` pause · `M` abandon run to menu (paused / wrecked) | Android back button / pause |
+| `F` (hold) — bail out at a RUIN SITE | hold on-screen **BAIL** button |
+| On foot: `WASD` move · mouse look · `LMB/Space` work · `1`/`2` tools · `E` grab / exfil | auto-walk + screen thirds · **WORK** button holds tools/exfil · tap = grab |
 | hold `Space` / click on loading = fast-forward | tap & hold anywhere |
 
 ## Build & run
@@ -249,10 +251,11 @@ CI (`.github/workflows/build.yml`):
 ```
 src/
   main.rs               — entry point, state machine bootstrap
-  states/               — app state machine (Loading → Menu → Driving)
+  states/               — app state machine (Loading → Menu → Driving ⇄ OnFoot)
     loading.rs          — build-time asset-stream loading screen
     menu.rs             — main menu + service record (reads the JSON save)
-    driving.rs          — the endless-highway run
+    driving.rs          — the endless-highway run (+ ruin-site bail logic)
+    onfoot.rs           — on-foot salvage episode (Module 7): seeded ruin bowl
   entities/
     truck.rs            — the war rig (build, physics, draw)
     projectiles.rs      — pooled AP/incendiary/rockets (zero alloc)

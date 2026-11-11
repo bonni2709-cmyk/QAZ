@@ -1,8 +1,9 @@
 //! RAILGUN PURSUIT 3D — hardcore 3D run-and-gun & survival.
 //!
-//! State flow: Loading → Menu → Driving (menu abandons/resumes runs).
-//! Scope landed through Module 6: 3D core, turret combat, loot economy,
-//! sandstorms & the JUGGERNAUT, build-time asset pack, menus & JSON saves.
+//! State flow: Loading → Menu → Driving ⇄ OnFoot (hold F at a ruin site).
+//! Scope landed through Module 7: 3D core, turret combat, loot economy,
+//! sandstorms & the JUGGERNAUT, build-time asset pack, menus & JSON saves,
+//! on-foot ruin-site salvage sorties.
 
 mod entities;
 mod states;

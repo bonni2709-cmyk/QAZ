@@ -289,6 +289,34 @@ def gen_workbench() -> None:
     write_wav(SFX / "workbench.wav", sig)
 
 
+def gen_grinder() -> None:
+    """Angle grinder buzzing metal — 0.5 s, played repeatedly while cutting."""
+    t = t_axis(0.50)
+    rng = np.random.default_rng(2424)
+    sig = np.zeros_like(t)
+    for freq, amp in ((214.0, 1.0), (428.0, 0.55), (643.0, 0.30), (1712.0, 0.18), (2431.0, 0.10)):
+        sig += amp * np.sin(2.0 * np.pi * freq * t)
+    sig *= 0.72 + 0.28 * np.sin(2.0 * np.pi * 28.0 * t)  # 28 Hz tremolo
+    sig += rng.standard_normal(t.shape).astype(np.float32) * 0.16
+    sig = np.tanh(1.6 * sig)
+    sig /= np.max(np.abs(sig)) / 0.78
+    write_wav(SFX / "grinder.wav", sig)
+
+
+def gen_pry() -> None:
+    """Screwdriver ratchet — two metallic clicks with a clank."""
+    t = t_axis(0.20)
+    rng = np.random.default_rng(3535)
+    sig = np.zeros_like(t)
+    for delay in (0.0, 0.085):
+        seg = np.clip(t - delay, 0.0, None)
+        sig += np.where(t >= delay, np.sin(2.0 * np.pi * 720.0 * seg) * np.exp(-seg / 0.028) * 0.8, 0.0).astype(np.float32)
+    sig += np.sin(2.0 * np.pi * 186.0 * t) * np.exp(-t / 0.05) * 0.5
+    sig += rng.standard_normal(t.shape).astype(np.float32) * 0.12 * np.exp(-t / 0.04)
+    sig /= np.max(np.abs(sig)) / 0.70
+    write_wav(SFX / "pry.wav", sig)
+
+
 # ------------------------------------------------------------------ music
 
 def gen_music() -> None:
@@ -522,6 +550,8 @@ def main() -> int:
     gen_mine_beep()
     gen_ram_crash()
     gen_workbench()
+    gen_grinder()
+    gen_pry()
     print("music:")
     gen_music()
 

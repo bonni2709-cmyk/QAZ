@@ -19,6 +19,7 @@ use crate::systems::loot::{LootKind, LootPool};
 use crate::systems::particles::{ParticlePool, TracerPool};
 use crate::systems::assets::AssetBundle;
 use crate::systems::savegame::{self, SaveData};
+use crate::states::onfoot::{OnFootOutcome, BAIL_HOLD};
 use crate::systems::turret::{AmmoKind, TurretState};
 use crate::systems::upgrades::UpgradeState;
 use crate::systems::weather::{Weather, WeatherEvent};
@@ -68,6 +69,12 @@ pub struct DrivingState {
     wb_flash: f32,
     wrecked: bool,
     wreck_boom_done: bool,
+    /// z of the nearest ruin site ahead (always spawns on the shoulder)
+    site_z: f32,
+    site_seed: u64,
+    site_side: f32,
+    bail_hold: f32,
+    bail_requested: Option<u64>,
     fade_in: f32,
     hit_timer: f32,
     kill_timer: f32,
@@ -82,6 +89,54 @@ fn hit_roll(rng: &mut u64) -> f32 {
     x ^= x >> 27;
     *rng = x;
     (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f32 / (1u64 << 53) as f32
+}
+
+#[inline]
+fn mix64(mut x: u64) -> u64 {
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    x ^ (x >> 33)
+}
+
+/// How far off the road axis a ruin site sits (always full-shoulder, never blocking).
+const SITE_SIDE_X: f32 = 12.5;
+
+/// Distance (m) at which a site counts as "you are here".
+const SITE_REACH: f32 = 26.0;
+
+/// Deterministic roadside marker drawn in the 3D pass. Cheap axis-aligned
+/// silhouettes + a pulsing amber beacon column — readable from 250 m out.
+fn draw_ruin_marker(x: f32, z: f32, time: f32, ambient: f32) {
+    let a = ambient;
+    let chunk = |px: f32, py: f32, pz: f32, sx: f32, sy: f32, sz: f32, shade: f32| {
+        let c = Color::new(shade * a + 0.02, shade * a * 0.92 + 0.02, shade * a * 0.80 + 0.015, 1.0);
+        draw_cube(vec3(px, py, pz), vec3(sx, sy, sz), None, c);
+    };
+    draw_plane(vec3(x, 0.02, z), vec2(10.0, 10.0), None, Color::new(0.09 * a + 0.02, 0.08 * a + 0.02, 0.07 * a + 0.015, 1.0));
+    chunk(x - 1.8, 0.9, z + 0.5, 2.3, 1.8, 1.7, 0.34);
+    chunk(x + 2.0, 1.5, z - 1.1, 1.5, 3.0, 1.4, 0.29);
+    chunk(x + 0.1, 0.55, z + 2.3, 2.9, 1.1, 1.3, 0.37);
+    chunk(x - 0.4, 2.6, z - 0.3, 0.9, 0.8, 0.8, 0.26);
+    // hazard beacon — vertical light column so the site reads from far away
+    let pulse = 0.5 + 0.5 * (time * 2.1).sin();
+    draw_cylinder(
+        vec3(x, 0.02, z),
+        0.55,
+        0.55,
+        24.0,
+        None,
+        Color::new(1.0, 0.62, 0.12, 0.10 + 0.16 * pulse),
+    );
+    draw_cylinder(
+        vec3(x, 0.10, z),
+        1.25,
+        1.25,
+        0.22,
+        None,
+        Color::new(1.0, 0.55, 0.10, 0.30 + 0.35 * pulse),
+    );
 }
 
 #[inline]
@@ -147,6 +202,24 @@ fn android_fire_touch() -> bool {
 
 /// Android WORKBENCH toggle button (tap = toggle, not hold).
 #[cfg(target_os = "android")]
+/// Android BAIL-OUT hold: button only works (and is drawn) near a ruin site.
+#[cfg(target_os = "android")]
+fn bail_touch_held() -> bool {
+    let (cx, cy, r) = crate::ui::bail_button_center();
+    touches().iter().any(|t| {
+        matches!(t.phase, TouchPhase::Started | TouchPhase::Moved | TouchPhase::Stationary) && {
+            let dx = t.position.x - cx;
+            let dy = t.position.y - cy;
+            dx * dx + dy * dy <= (r + 10.0) * (r + 10.0)
+        }
+    })
+}
+
+#[cfg(not(target_os = "android"))]
+fn bail_touch_held() -> bool {
+    false
+}
+
 fn wb_touched() -> bool {
     let (cx, cy, r) = crate::ui::wb_button_center();
     touches().iter().any(|t| {
@@ -185,6 +258,11 @@ impl DrivingState {
             mines: MinePool::new(),
             next_boss_at: 1300.0,
             boss_contact_cd: 0.0,
+            site_z: 430.0 + (mix64(save.total_runs ^ 0xB411_5EED) % 160) as f32,
+            site_seed: mix64(0x5EED_B411 ^ save.total_runs.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
+            site_side: if mix64(save.total_runs ^ 0x5171_E5) & 1 == 0 { -1.0 } else { 1.0 },
+            bail_hold: 0.0,
+            bail_requested: None,
             event_banner: 0.0,
             event_banner_text: "",
             was_overheated: false,
@@ -237,6 +315,50 @@ impl DrivingState {
         self.save_dirty = false;
         self.save_flush_timer = 0.0;
         let _ = savegame::store(&self.save);
+    }
+
+    /// Push the ruin-site marker further down the road with a fresh seed.
+    fn advance_site(&mut self) {
+        self.site_seed = mix64(self.site_seed);
+        let h = mix64(self.site_seed ^ 0x5171_7E5E);
+        self.site_side = if h & 1 == 0 { -1.0 } else { 1.0 };
+        // spacing: 480–820 m, always ahead of wherever the rig currently is
+        self.site_z = self.site_z.max(self.truck.position.z) + 480.0 + (mix64(h) % 340) as f32;
+        self.bail_hold = 0.0;
+    }
+
+    /// True while the rig sits in a ruin site's reach (slow enough to bail).
+    fn site_in_reach(&self) -> bool {
+        (self.site_z - self.truck.position.z).abs() <= SITE_REACH && self.truck.speed.abs() < 6.5
+    }
+
+    /// The app calls this after update(); Some(seed) = swap to the on-foot episode.
+    pub fn take_bail_request(&mut self) -> Option<u64> {
+        self.bail_requested.take()
+    }
+
+    /// Fold an on-foot sortie back into the rig.
+    /// Medkits patch +18 HULL each (same as roadside repair pickups); a blackout
+    /// already zeroed the bag inside the episode — nothing to hand back but the rig.
+    pub fn apply_onfoot_outcome(&mut self, outcome: OnFootOutcome) {
+        self.upgrades.add_scrap(outcome.scrap);
+        if outcome.medkits > 0 {
+            self.truck.health = (self.truck.health + outcome.medkits as f32 * 18.0).min(self.truck.max_health);
+        }
+        self.event_banner = 3.0;
+        self.event_banner_text = if outcome.blacked_out {
+            "YOU BLACKED OUT — THE SALVAGE IS GONE"
+        } else if outcome.scrap > 0 || outcome.medkits > 0 {
+            "SALVAGE SECURED — BACK ON THE ROAD"
+        } else {
+            "EMPTY HANDED — BUT BREATHING"
+        };
+        // update() stopped the loops the moment the bail fired — bring them back
+        self.assets.start_loop(&self.assets.engine, self.engine_vol);
+        self.assets.start_loop(&self.assets.music, 0.30);
+        self.assets.start_loop(&self.assets.wind, self.wind_vol);
+        self.save_dirty = true;
+        self.fade_in = 0.5;
     }
 
     fn stop_loops(&self) {
@@ -865,6 +987,32 @@ impl DrivingState {
             self.persist_save(true);
         }
 
+        // ---------- ruin site: hold F to bail out ----------
+        {
+            let dz = self.site_z - self.truck.position.z;
+            if dz < -SITE_REACH {
+                // rolled straight past it — the wasteland keeps it for itself
+                self.advance_site();
+            } else if self.site_in_reach() {
+                let bail_held = is_key_down(KeyCode::F) || bail_touch_held();
+                if bail_held {
+                    self.bail_hold += dt;
+                    if self.bail_hold >= BAIL_HOLD {
+                        self.stop_loops();
+                        self.bail_requested = Some(self.site_seed);
+                        self.advance_site(); // consumption: no instant re-bail on return
+                        self.bail_hold = 0.0;
+                        self.save_dirty = true;
+                        return; // freeze this frame — App swaps into the on-foot episode
+                    }
+                } else {
+                    self.bail_hold = (self.bail_hold - dt * 2.0).max(0.0);
+                }
+            } else {
+                self.bail_hold = 0.0;
+            }
+        }
+
         // ---------- save flush (debounced: at most one write per 5 s, only when dirty) ----------
         if self.save_dirty {
             self.save_flush_timer += dt;
@@ -918,6 +1066,10 @@ impl DrivingState {
             self.assets.sand.as_ref(),
             self.assets.concrete.as_ref(),
         );
+        let site_dz = self.site_z - z;
+        if site_dz.abs() < 260.0 {
+            draw_ruin_marker(self.site_side * SITE_SIDE_X, self.site_z, time, ambient);
+        }
         self.enemies.draw(ambient);
         if let Some(boss) = &mut self.boss {
             boss.draw(ambient, time);
@@ -997,6 +1149,43 @@ impl DrivingState {
 
         if self.rocket_warning && !self.wrecked && !self.workbench_open {
             ui::draw_incoming_warning();
+        }
+
+        if !self.wrecked && !self.workbench_open && !self.paused {
+            let site_dz = self.site_z - z;
+            if self.site_in_reach() {
+                let sw = screen_width();
+                let sh = screen_height();
+                #[cfg(target_os = "android")]
+                let msg = "RUIN SITE  —  HOLD  [BAIL]  TO STEP OUT";
+                #[cfg(not(target_os = "android"))]
+                let msg = "RUIN SITE  —  HOLD  [F]  TO BAIL OUT";
+                let dim = measure_text(msg, None, 30, 1.0);
+                let x = (sw - dim.width) * 0.5;
+                let y = sh * 0.70;
+                draw_text(msg, x + 2.0, y + 2.0, 30.0, Color::new(0.0, 0.0, 0.0, 0.7));
+                draw_text(msg, x, y, 30.0, Color::new(1.0, 0.78, 0.30, 1.0));
+                // hold progress
+                let pw = sw * 0.24;
+                let ph = 10.0;
+                let px = (sw - pw) * 0.5;
+                let py = y + 12.0;
+                draw_rectangle(px - 2.0, py - 2.0, pw + 4.0, ph + 4.0, Color::new(0.0, 0.0, 0.0, 0.6));
+                draw_rectangle(px, py, pw * (self.bail_hold / BAIL_HOLD).clamp(0.0, 1.0), ph, Color::new(1.0, 0.65, 0.15, 1.0));
+                #[cfg(target_os = "android")]
+                {
+                    let (bx, by, br) = crate::ui::bail_button_center();
+                    draw_circle(bx, by, br, Color::new(0.98, 0.62, 0.12, 0.35));
+                    draw_circle_lines(bx, by, br, 3.0, Color::new(1.0, 0.72, 0.28, 0.9));
+                    let d = measure_text("BAIL", None, 20, 1.0);
+                    draw_text("BAIL", bx - d.width * 0.5, by + 7.0, 20.0, Color::new(1.0, 0.88, 0.55, 1.0));
+                }
+            } else if site_dz > SITE_REACH && site_dz < 150.0 {
+                let sw = screen_width();
+                let msg = format!("RUIN SITE  {:.0} m", site_dz);
+                let d = measure_text(&msg, None, 20, 1.0);
+                draw_text(&msg, (sw - d.width) * 0.5, screen_height() * 0.315, 20.0, Color::new(1.0, 0.78, 0.30, 0.80));
+            }
         }
 
         if !self.paused && !self.wrecked && !self.workbench_open {

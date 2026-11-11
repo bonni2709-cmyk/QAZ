@@ -81,6 +81,8 @@ pub struct AssetBundle {
     pub mine_beep: Option<Sound>,
     pub ram_crash: Option<Sound>,
     pub workbench: Option<Sound>,
+    pub grinder: Option<Sound>,
+    pub pry: Option<Sound>,
     pub asphalt: Option<Texture2D>,
     pub sand: Option<Texture2D>,
     pub concrete: Option<Texture2D>,
@@ -104,6 +106,8 @@ impl AssetBundle {
             mine_beep: None,
             ram_crash: None,
             workbench: None,
+            grinder: None,
+            pry: None,
             asphalt: None,
             sand: None,
             concrete: None,
@@ -139,6 +143,8 @@ impl AssetBundle {
         let mine_beep = Self::load_sound_slot(p, "audio/mine_beep.wav").await;
         let ram_crash = Self::load_sound_slot(p, "audio/ram_crash.wav").await;
         let workbench = Self::load_sound_slot(p, "audio/workbench.wav").await;
+        let grinder = Self::load_sound_slot(p, "audio/grinder.wav").await;
+        let pry = Self::load_sound_slot(p, "audio/pry.wav").await;
         let asphalt = Self::load_texture_slot(p, "textures/asphalt_4k.jpg").await;
         let sand = Self::load_texture_slot(p, "textures/sand_4k.jpg").await;
         let concrete = Self::load_texture_slot(p, "textures/concrete_4k.jpg").await;
@@ -157,6 +163,8 @@ impl AssetBundle {
             mine_beep,
             ram_crash,
             workbench,
+            grinder,
+            pry,
             asphalt,
             sand,
             concrete,
