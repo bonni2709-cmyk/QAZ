@@ -166,6 +166,7 @@ fn wb_touched() -> bool {
 impl DrivingState {
     pub fn new(assets: AssetBundle) -> DrivingState {
         let save = savegame::load();
+        let persisted_best = save.best_m;
         let upgrades = UpgradeState::restore(save.scrap, [save.armor, save.turret, save.engine, save.magnet]);
         let mut state = DrivingState {
             truck: Truck::new(),
@@ -198,7 +199,7 @@ impl DrivingState {
             hit_rng: 0xA5A5_5A5A_3C3C_C3C3,
             time_of_day: 0.34, // mid-morning wasteland light
             distance_m: 0.0,
-            best_m: save.best_m,
+            best_m: persisted_best,
             kills: 0,
             biome_band: biome_at(0.0).band_index(),
             banner_timer: 3.2,
@@ -404,14 +405,16 @@ impl DrivingState {
             }
         }
 
-        if is_key_pressed(KeyCode::R) {
-            self.reset_run();
-            return;
-        }
-        if is_key_pressed(KeyCode::M) && (self.wrecked || self.paused) {
+        // bail to the menu: M (paused or wrecked), or BACK/ESCAPE while wrecked
+        if (self.wrecked && escape_pressed) || (is_key_pressed(KeyCode::M) && (self.wrecked || self.paused)) {
             self.persist_save(false);
             self.stop_loops();
             self.abandon_requested = true;
+            return;
+        }
+
+        if is_key_pressed(KeyCode::R) {
+            self.reset_run();
             return;
         }
 
