@@ -289,7 +289,7 @@ jobs:
           echo "ANDROID_NDK_ROOT=${NDK_HOME}" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_LATEST_HOME=${NDK_HOME}" >> "$GITHUB_ENV"
 
-      - name: Ensure the android-29 platform exists (cargo-quad-apk requires exactly this jar)
+      - name: Ensure the android-36 platform exists (miniquad's MainActivity needs API 30+ symbols)
         shell: bash
         run: |
           set -euo pipefail
@@ -306,12 +306,12 @@ jobs:
           echo "sdkmanager: ${SDKMANAGER:-NOT FOUND}"
           if [ -n "${SDKMANAGER}" ]; then
             yes | "${SDKMANAGER}" --licenses >/dev/null 2>&1 || true
-            "${SDKMANAGER}" "platforms;android-29"
+            "${SDKMANAGER}" "platforms;android-36"
           else
-            echo "::error::sdkmanager not found — cannot install platforms;android-29"
+            echo "::error::sdkmanager not found — cannot install platforms;android-36"
             exit 1
           fi
-          test -f "${ANDROID_SDK_ROOT}/platforms/android-29/android.jar" && echo "android-29 OK"
+          test -f "${ANDROID_SDK_ROOT}/platforms/android-36/android.jar" && echo "android-36 OK"
 
       - name: Install cargo-quad-apk
         # crates.io cargo-quad-apk 0.1.4 is the pre-2025 codebase: it needs a Java 8

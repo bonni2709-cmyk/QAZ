@@ -23,8 +23,8 @@ serde_json = "1" # renders assets/manifest.json into the loading screen's OUT_DI
 # Android packaging metadata (cargo-quad-apk, see .github/workflows/build.yml)
 # ---------------------------------------------------------------------------
 [package.metadata.android]
-android_version = 29
-target_sdk_version = 29
+android_version = 36
+target_sdk_version = 36
 assets = "assets/"
 res = "android_res"
 icon = "@mipmap/ic_launcher"
