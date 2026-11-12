@@ -270,6 +270,14 @@ jobs:
           # <ndk_triple>-ar / <ndk_triple>-ld — NDK r23+ renamed them to
           # llvm-ar / ld. Provide symlinks so the tool finds what it wants.
           TOOLBIN="${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          # older cargo-quad-apk hardcodes <root>/lib/clang/<ver>/... — r27 ships
+          # lib64/clang instead. Bridge it, and print where the unwind libs live.
+          LLVM_ROOT="${TOOLBIN%/bin}"
+          if [ -d "${LLVM_ROOT}/lib64/clang" ] && [ ! -e "${LLVM_ROOT}/lib" ]; then
+            ln -sfn lib64 "${LLVM_ROOT}/lib" || sudo ln -sfn lib64 "${LLVM_ROOT}/lib" || true
+          fi
+          find "${LLVM_ROOT}" -maxdepth 6 -name 'libunwind.a' 2>/dev/null | sed 's/^/UNWIND /' | head -12
+
           for TGT in arm-linux-androideabi aarch64-linux-android x86_64-linux-android i686-linux-android; do
             if [ ! -e "${TOOLBIN}/${TGT}-ar" ] && [ -e "${TOOLBIN}/llvm-ar" ]; then
               ln -sfn llvm-ar "${TOOLBIN}/${TGT}-ar" || sudo ln -sfn llvm-ar "${TOOLBIN}/${TGT}-ar" || true
