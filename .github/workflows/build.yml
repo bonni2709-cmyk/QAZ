@@ -238,8 +238,23 @@ jobs:
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
           NDK_HOME="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
           if [ -z "${NDK_HOME}" ]; then
+            # cargo-quad-apk wants the legacy target-prefixed binutils (e.g.
+            # arm-linux-androideabi-ar). The newest NDK (r30) no longer ships
+            # them — prefer the oldest installed NDK that still does.
             NDK_ROOT="${SDK_ROOT}/ndk"
-            NDK_HOME="${NDK_ROOT}/$(ls "${NDK_ROOT}" | sort -V | tail -1)"
+            NDK_HOME=""
+            for CAND in $(ls "${NDK_ROOT}" | sort -V); do
+              AR="${NDK_ROOT}/${CAND}/toolchains/llvm/prebuilt/linux-x86_64/bin/arm-linux-androideabi-ar"
+              echo "candidate ${CAND}: $([ -x "${AR}" ] && echo has arm-linux-androideabi-ar || echo MISSING)"
+              if [ -x "${AR}" ]; then
+                NDK_HOME="${NDK_ROOT}/${CAND}"
+                break
+              fi
+            done
+            if [ -z "${NDK_HOME}" ]; then
+              NDK_HOME="${NDK_ROOT}/$(ls "${NDK_ROOT}" | sort -V | head -1)"
+              echo "::error::no NDK with arm-linux-androideabi-ar found; falling back to ${NDK_HOME} anyway"
+            fi
           fi
           test -d "${NDK_HOME}"
           echo "SDK_ROOT=${SDK_ROOT}"
