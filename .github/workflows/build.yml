@@ -236,131 +236,56 @@ jobs:
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
-          # cargo-quad-apk wants the legacy target-prefixed binutils (e.g.
-          # arm-linux-androideabi-ar). NDK r30 no longer ships them, so do NOT
-          # trust the preinstalled ANDROID_NDK_LATEST_HOME — always probe the
-          # SDK directory and pick the oldest NDK that still has the tools.
           NDK_ROOT="${SDK_ROOT}/ndk"
+
+          # Probe for the oldest NDK that ships llvm-ar; NDK r23+ renamed the
+          # legacy target-prefixed binutils to llvm-* / plain, so do NOT trust
+          # the preinstalled ANDROID_NDK_LATEST_HOME.
           NDK_HOME=""
           for CAND in $(ls "${NDK_ROOT}" | sort -V); do
-            AR="${NDK_ROOT}/${CAND}/toolchains/llvm/prebuilt/linux-x86_64/bin/arm-linux-androideabi-ar"
-            echo "candidate ${CAND}: $([ -x "${AR}" ] && echo has arm-linux-androideabi-ar || echo MISSING)"
-            if [ -x "${AR}" ]; then
+            TB="${NDK_ROOT}/${CAND}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            if [ -x "${TB}/llvm-ar" ]; then
               NDK_HOME="${NDK_ROOT}/${CAND}"
+              echo "selected NDK ${CAND}"
               break
             fi
           done
-          if [ -z "${NDK_HOME}" ]; then
-            # fall back to llvm-ar aliases if the legacy ones are gone everywhere
-            for CAND in $(ls "${NDK_ROOT}" | sort -V); do
-              AR="${NDK_ROOT}/${CAND}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-              if [ -x "${AR}" ]; then
-                for TGT in arm-linux-androideabi aarch64-linux-android x86_64-linux-android; do
-                  ln -sf "llvm-ar" "${NDK_ROOT}/${CAND}/toolchains/llvm/prebuilt/linux-x86_64/bin/${TGT}-ar" || true
-                done
-                NDK_HOME="${NDK_ROOT}/${CAND}"
-                echo "aliased llvm-ar -> *-ar for ${CAND}"
-                break
-              fi
-            done
-          fi
           test -d "${NDK_HOME}"
-
-          # old quad-apk ends its linker search path with <root>/lib/clang/18/lib/linux/<arch>/libunwind.a
-          # (find_libunwind_dir); if the path is wrong, cargo passes -L <libunwind dir> and the sysroot
-          # clang driver cannot see libunwind. Point the linker search at the real file instead.
-          CLANG_CROSS_DIR=$(ls -d "${TOOLBIN}"/../lib/clang/*/lib/linux 2>/dev/null || ls -d "${TOOLBIN}"/../lib64/clang/*/lib/linux 2>/dev/null || true)
-          echo "CLANG_CROSS_DIR=${CLANG_CROSS_DIR}"
-          [ -n "${CLANG_CROSS_DIR}" ] && for D in "${CLANG_CROSS_DIR}"/*/; do echo "  unwind in ${D}: $(ls "${D}" 2>/dev/null | tr '\n' ' ')"; done
-
-          # also link libunwind search dir as the ACTUAL -L cargo-quad-apk expects
-          LLVM_ROOT="${TOOLBIN%/bin}"
-          CLANG_VER_DIR=$(ls -d "${LLVM_ROOT}"/lib*/clang/* 2>/dev/null | head -1)
-          CLANG_VER=$(basename "${CLANG_VER_DIR}")
-          for ARCH in aarch64 x86_64 arm i386; do
-            SRC=$(find "${LLVM_ROOT}" -path "*/clang/${CLANG_VER}/lib/linux/${ARCH}/libunwind.a" 2>/dev/null | head -1)
-            DST="${LLVM_ROOT}/lib/clang/18/lib/linux/${ARCH}"
-            echo "ARCH=${ARCH} SRC=${SRC} DST=${DST}"
-            if [ -n "${SRC}" ] && [ ! -e "${DST}/libunwind.a" ]; then
-              mkdir -p "${DST}" 2>/dev/null && ln -sfn "${SRC}" "${DST}/libunwind.a" || true
-            fi
-          done
-
-                    # cargo-quad-apk (crates.io) still looks for the pre-r23 legacy names
-          # <ndk_triple>-ar / <ndk_triple>-ld — NDK r23+ renamed them to
-          # llvm-ar / ld. Provide symlinks so the tool finds what it wants.
           TOOLBIN="${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          # older cargo-quad-apk hardcodes <root>/lib/clang/<ver>/... — r27 ships
-          # lib64/clang instead. Bridge it, and print where the unwind libs live.
-          LLVM_ROOT="${TOOLBIN%/bin}"
-          if [ -d "${LLVM_ROOT}/lib64/clang" ] && [ ! -e "${LLVM_ROOT}/lib" ]; then
-            ln -sfn lib64 "${LLVM_ROOT}/lib" || sudo ln -sfn lib64 "${LLVM_ROOT}/lib" || true
-          fi
-          # annotated inventory — the only channel readable from the dev sandbox
-          for V in 27.3.13750724 29.0.14206865 30.0.16248370; do
-            LR="${NDK_ROOT}/${V}/toolchains/llvm/prebuilt/linux-x86_64"
-            F=$(find "${LR}" \( -name 'libunwind*' -o -name 'libgcc.a' \) 2>/dev/null | sed "s|${LR}/||g" | sort | paste -sd' ' -)
-            ARCH=$(ls "${LR}" 2>/dev/null | paste -sd, -)
-            printf '::warning::inv-%s top={%s} fs={%s}\n' "${V}" "${ARCH}" "${F}"
-          done
 
+          # cargo-quad-apk (crates.io) looks for the pre-r23 legacy names
+          # <triple>-ar / <triple>-ld; NDK r23+ renamed them to llvm-ar / ld.
           for TGT in arm-linux-androideabi aarch64-linux-android x86_64-linux-android i686-linux-android; do
-            if [ ! -e "${TOOLBIN}/${TGT}-ar" ] && [ -e "${TOOLBIN}/llvm-ar" ]; then
-              ln -sfn llvm-ar "${TOOLBIN}/${TGT}-ar" || sudo ln -sfn llvm-ar "${TOOLBIN}/${TGT}-ar" || true
-            fi
-            if [ ! -e "${TOOLBIN}/${TGT}-ld" ] && [ -e "${TOOLBIN}/ld" ]; then
-              ln -sfn ld "${TOOLBIN}/${TGT}-ld" || sudo ln -sfn ld "${TOOLBIN}/${TGT}-ld" || true
-            fi
+            [ -e "${TOOLBIN}/${TGT}-ar" ] || ln -sfn llvm-ar "${TOOLBIN}/${TGT}-ar" || true
+            [ -e "${TOOLBIN}/${TGT}-ld" ] || ln -sfn ld "${TOOLBIN}/${TGT}-ld" || true
           done
 
-          # guarantee `-lunwind` resolves: hand rustc per-target search paths so the
-          # bare `<triple>-ld` link can find the NDK's clang resource libunwind.a
-          CLANG_LINUX_DIR=$(ls -d "${NDK_HOME}"/toolchains/llvm/prebuilt/linux-x86_64/lib*/clang/*/lib/linux 2>/dev/null | head -1)
+          # guarantee `-lunwind` resolves: hand rustc per-target search paths
+          # pointing at the NDK clang resource dir that holds libunwind.a
+          CLANG_LINUX_DIR="$(ls -d "${NDK_HOME}"/toolchains/llvm/prebuilt/linux-x86_64/lib*/clang/*/lib/linux 2>/dev/null | head -1 || true)"
+          echo "CLANG_LINUX_DIR=${CLANG_LINUX_DIR}"
           if [ -n "${CLANG_LINUX_DIR}" ]; then
             for ARCH in aarch64 x86_64 arm i386; do
               D="${CLANG_LINUX_DIR}/${ARCH}"
-              if [ -f "${D}/libunwind.a" ]; then
-                U=$(printf '%s' "${ARCH}" | tr '[:lower:]' '[:upper:]')
-                case "${ARCH}" in
-                  aarch64) TR="AARCH64_LINUX_ANDROID" ;;
-                  x86_64)  TR="X86_64_LINUX_ANDROID" ;;
-                  arm)     TR="ARMV7_LINUX_ANDROIDEABI" ;;
-                  i386)    TR="I686_LINUX_ANDROID" ;;
-                esac
-                echo "CARGO_TARGET_${TR}_RUSTFLAGS=-L ${D}"
-                echo "CARGO_TARGET_${TR}_RUSTFLAGS=-L ${D}" >> "$GITHUB_ENV"
-              fi
+              [ -f "${D}/libunwind.a" ] || continue
+              case "${ARCH}" in
+                aarch64) TR="AARCH64_LINUX_ANDROID" ;;
+                x86_64)  TR="X86_64_LINUX_ANDROID" ;;
+                arm)     TR="ARMV7_LINUX_ANDROIDEABI" ;;
+                i386)    TR="I686_LINUX_ANDROID" ;;
+              esac
+              echo "CARGO_TARGET_${TR}_RUSTFLAGS=-L ${D}"
+              printf 'CARGO_TARGET_%s_RUSTFLAGS=-L %s\n' "${TR}" "${D}" >> "$GITHUB_ENV"
             done
           fi
 
-          echo "SDK_ROOT=${SDK_ROOT}"
-          # visibility for headless debugging (annotations are the only channel we can read):
-          PLATFORMS="$(ls "${SDK_ROOT}/platforms" 2>/dev/null | paste -sd, -)"
-          BUILD_TOOLS="$(ls "${SDK_ROOT}/build-tools" 2>/dev/null | paste -sd, -)"
-          NDKS="$(ls "${SDK_ROOT}/ndk" 2>/dev/null | paste -sd, -)"
-          echo "PLATFORMS=${PLATFORMS}"
-          echo "BUILD_TOOLS=${BUILD_TOOLS}"
-          echo "NDKS=${NDKS}"
-          printf '::warning::PLATFORMS %s | BUILD_TOOLS %s | NDK %s\n' "${PLATFORMS}" "${BUILD_TOOLS}" "${NDKS}"
           echo "NDK_HOME=${NDK_HOME}"
-          echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
-          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
-          echo "NDK_HOME=${NDK_HOME}" >> "${GITHUB_ENV}"
-          echo "ANDROID_NDK_HOME=${NDK_HOME}" >> "${GITHUB_ENV}"
-          echo "ANDROID_NDK_ROOT=${NDK_HOME}" >> "${GITHUB_ENV}"
-          # quad-apk shells out to plain `cargo build`; give it the same NDK linkers the cross job uses
-          case_linker() {
-            case "$1" in
-              aarch64-linux-android)   echo aarch64-linux-android26-clang ;;
-              armv7-linux-androideabi) echo armv7a-linux-androideabi26-clang ;;
-              x86_64-linux-android)    echo x86_64-linux-android26-clang ;;
-            esac
-          }
-          for T in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
-            LINKER="${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/$(case_linker "${T}")"
-            ENV_NAME="CARGO_TARGET_$(echo "${T}" | tr 'a-z-' 'A-Z_')_LINKER"
-            echo "${ENV_NAME}=${LINKER}" >> "${GITHUB_ENV}"
-          done
+          echo "ANDROID_HOME=${SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "NDK_HOME=${NDK_HOME}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${NDK_HOME}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${NDK_HOME}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_LATEST_HOME=${NDK_HOME}" >> "$GITHUB_ENV"
 
       - name: Ensure the android-29 platform exists (cargo-quad-apk requires exactly this jar)
         shell: bash
