@@ -266,7 +266,27 @@ jobs:
           fi
           test -d "${NDK_HOME}"
 
-          # cargo-quad-apk (crates.io) still looks for the pre-r23 legacy names
+          # old quad-apk ends its linker search path with <root>/lib/clang/18/lib/linux/<arch>/libunwind.a
+          # (find_libunwind_dir); if the path is wrong, cargo passes -L <libunwind dir> and the sysroot
+          # clang driver cannot see libunwind. Point the linker search at the real file instead.
+          CLANG_CROSS_DIR=$(ls -d "${TOOLBIN}"/../lib/clang/*/lib/linux 2>/dev/null || ls -d "${TOOLBIN}"/../lib64/clang/*/lib/linux 2>/dev/null || true)
+          echo "CLANG_CROSS_DIR=${CLANG_CROSS_DIR}"
+          [ -n "${CLANG_CROSS_DIR}" ] && for D in "${CLANG_CROSS_DIR}"/*/; do echo "  unwind in ${D}: $(ls "${D}" 2>/dev/null | tr '\n' ' ')"; done
+
+          # also link libunwind search dir as the ACTUAL -L cargo-quad-apk expects
+          LLVM_ROOT="${TOOLBIN%/bin}"
+          CLANG_VER_DIR=$(ls -d "${LLVM_ROOT}"/lib*/clang/* 2>/dev/null | head -1)
+          CLANG_VER=$(basename "${CLANG_VER_DIR}")
+          for ARCH in aarch64 x86_64 arm i386; do
+            SRC=$(find "${LLVM_ROOT}" -path "*/clang/${CLANG_VER}/lib/linux/${ARCH}/libunwind.a" 2>/dev/null | head -1)
+            DST="${LLVM_ROOT}/lib/clang/18/lib/linux/${ARCH}"
+            echo "ARCH=${ARCH} SRC=${SRC} DST=${DST}"
+            if [ -n "${SRC}" ] && [ ! -e "${DST}/libunwind.a" ]; then
+              mkdir -p "${DST}" 2>/dev/null && ln -sfn "${SRC}" "${DST}/libunwind.a" || true
+            fi
+          done
+
+                    # cargo-quad-apk (crates.io) still looks for the pre-r23 legacy names
           # <ndk_triple>-ar / <ndk_triple>-ld — NDK r23+ renamed them to
           # llvm-ar / ld. Provide symlinks so the tool finds what it wants.
           TOOLBIN="${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
