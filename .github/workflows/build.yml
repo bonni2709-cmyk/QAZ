@@ -269,17 +269,20 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: |
-          set -o pipefail
-          cargo quad-apk build --release 2>&1 | tee /tmp/quad-apk.log
-
-      - name: Upload build log (always — CI log endpoint is unreachable from the dev sandbox)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: quad-apk-build-log
-          path: /tmp/quad-apk.log
-          if-no-files-found: warn
-          retention-days: 7
+          set +e
+          cargo quad-apk build --release > /tmp/quad-apk.log 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            echo "quad-apk exited $rc — emitting the diagnostic lines as annotations"
+            grep -inE "error|failed|panic|missing|not found|denied|rejected|exception" /tmp/quad-apk.log | tail -n 22 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line}"
+            done
+            # always emit the last lines too, so context survives filter misses
+            tail -n 6 /tmp/quad-apk.log | while IFS= read -r line; do
+              printf '::error::TAIL %s\n' "${line}"
+            done
+            exit $rc
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
