@@ -1,7 +1,6 @@
 # android_res — Android launcher resources (Module 6)
 
 (Moved to `docs/`: aapt rejects non-resource entries inside the res tree.)
-# android_res — Android launcher resources (Module 6)
 
 Launcher icon (`mipmap-*/ic_launcher.png`), five densities, wired into
 `Cargo.toml` via:
