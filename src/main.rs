@@ -42,7 +42,7 @@ async fn panic_screen(message: String, backtrace: String) {
 
 #[macroquad::main("RAILGUN PURSUIT 3D")]
 async fn main() {
-    macroquad::set_panic_handler(panic_screen);
+    set_panic_handler(panic_screen);
 
     let mut app = states::App::new();
     loop {
