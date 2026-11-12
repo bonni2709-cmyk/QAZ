@@ -276,7 +276,12 @@ jobs:
           if [ -d "${LLVM_ROOT}/lib64/clang" ] && [ ! -e "${LLVM_ROOT}/lib" ]; then
             ln -sfn lib64 "${LLVM_ROOT}/lib" || sudo ln -sfn lib64 "${LLVM_ROOT}/lib" || true
           fi
-          find "${LLVM_ROOT}" -maxdepth 6 -name 'libunwind.a' 2>/dev/null | sed 's/^/UNWIND /' | head -12
+          echo "---- libunwind/libgcc inventory across NDKs ----"
+          for NDKDIR in "${NDK_ROOT}"/*/toolchains/llvm/prebuilt/linux-x86_64; do
+            echo "NDKDIR ${NDKDIR}"
+            find "${NDKDIR}" \( -name 'libunwind.a' -o -name 'libgcc.a' \) 2>/dev/null | head -10 | sed 's/^/    /'
+          done
+          printf '::warning::unwind inventory printed in the plain log\n' 
 
           for TGT in arm-linux-androideabi aarch64-linux-android x86_64-linux-android i686-linux-android; do
             if [ ! -e "${TOOLBIN}/${TGT}-ar" ] && [ -e "${TOOLBIN}/llvm-ar" ]; then

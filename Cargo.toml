@@ -31,7 +31,9 @@ icon = "@mipmap/ic_launcher"
 version_code = 8
 version_name = "0.1.0-module8"
 build_targets = [
-    "armv7-linux-androideabi",
+    # Infinix Note 30 (Helio G99) is arm64; x86_64 for emulators/ChromeOS.
+    # armv7 was dropped: the NDK no longer ships arm32 libunwind.a, and
+    # cargo-quad-apk hardcodes the pre-r23 toolchain layout.
     "aarch64-linux-android",
     "x86_64-linux-android",
 ]
