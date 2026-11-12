@@ -2,6 +2,7 @@
 pub mod assets;
 pub mod chase;
 pub mod director;
+pub mod factions;
 pub mod loot;
 pub mod savegame;
 pub mod meshkit;

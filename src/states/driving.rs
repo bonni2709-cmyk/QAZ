@@ -18,8 +18,9 @@ use crate::systems::director::Director;
 use crate::systems::loot::{LootKind, LootPool};
 use crate::systems::particles::{ParticlePool, TracerPool};
 use crate::systems::assets::AssetBundle;
-use crate::systems::savegame::{self, SaveData};
+use crate::systems::savegame::{self, SaveData, NG_PLUS_MAX};
 use crate::states::onfoot::{OnFootOutcome, BAIL_HOLD};
+use crate::systems::factions::Faction;
 use crate::systems::turret::{AmmoKind, TurretState};
 use crate::systems::upgrades::UpgradeState;
 use crate::systems::weather::{Weather, WeatherEvent};
@@ -75,6 +76,8 @@ pub struct DrivingState {
     site_side: f32,
     bail_hold: f32,
     bail_requested: Option<u64>,
+    faction: Faction,
+    ng_plus: u32,
     fade_in: f32,
     hit_timer: f32,
     kill_timer: f32,
@@ -263,6 +266,8 @@ impl DrivingState {
             site_side: if mix64(save.total_runs as u64 ^ 0x5171_E5) & 1 == 0 { -1.0 } else { 1.0 },
             bail_hold: 0.0,
             bail_requested: None,
+            faction: Faction::from_biome(biome_at(0.0)),
+            ng_plus: save.ng_plus,
             event_banner: 0.0,
             event_banner_text: "",
             was_overheated: false,
@@ -291,6 +296,10 @@ impl DrivingState {
             kill_timer: 0.0,
             rocket_warning: false,
         };
+        // NG+ pressure and faction spawn table are not reset between runs —
+        // the wasteland remembers what you have survived
+        state.director.set_faction(state.faction);
+        state.director.set_hp_scale(1.0 + state.ng_plus as f32 * 0.15);
         // loops live until the wreck screen or a run reset
         state.assets.start_loop(&state.assets.music, 0.30);
         state.assets.start_loop(&state.assets.engine, 0.14);
@@ -325,6 +334,12 @@ impl DrivingState {
         // spacing: 480–820 m, always ahead of wherever the rig currently is
         self.site_z = self.site_z.max(self.truck.position.z) + 480.0 + (mix64(h) % 340) as f32;
         self.bail_hold = 0.0;
+    }
+
+    /// NG+ lethality multiplier applied to everything that hurts the rig.
+    #[inline]
+    fn incoming_scale(&self) -> f32 {
+        1.0 + self.ng_plus as f32 * 0.15
     }
 
     /// True while the rig sits in a ruin site's reach (slow enough to bail).
@@ -726,6 +741,13 @@ impl DrivingState {
         if band != self.biome_band {
             self.biome_band = band;
             self.banner_timer = 3.2;
+            self.faction = Faction::from_biome(biome_at(self.truck.position.z));
+            self.director.set_faction(self.faction);
+            self.event_banner = 2.4;
+            self.event_banner_text = match self.faction {
+                Faction::AshCartel => "ASH CARTEL TERRITORY",
+                Faction::DustDevils => "DUST DEVILS TERRITORY",
+            };
         }
 
         // ---------- hostiles ----------
@@ -756,7 +778,7 @@ impl DrivingState {
         for shot in self.events.smg_shots() {
             self.tracers.shoot(shot.from, shot.to, Color::new(1.0, 0.88, 0.45, 1.0), 0.10);
             if hit_roll(&mut self.hit_rng) < shot.hit_chance {
-                self.truck.apply_damage(shot.damage);
+                self.truck.apply_damage(shot.damage * self.incoming_scale());
                 self.camera.add_shake(0.06);
             }
         }
@@ -787,7 +809,7 @@ impl DrivingState {
                 && boss.horizontal_distance_to(self.truck.position) < 3.6
             {
                 self.boss_contact_cd = 1.6;
-                self.truck.apply_damage(26.0);
+                self.truck.apply_damage(26.0 * self.incoming_scale());
                 self.camera.add_shake(0.5);
                 self.assets.play(&self.assets.ram_crash, 0.85);
             }
@@ -795,7 +817,7 @@ impl DrivingState {
         // mines tick on their own clock
         let mine_dmg = self.mines.update(dt, self.truck.position, &mut self.particles);
         if mine_dmg > 0.0 {
-            self.truck.apply_damage(mine_dmg);
+            self.truck.apply_damage(mine_dmg * self.incoming_scale());
             self.camera.add_shake(0.45);
         }
 
@@ -897,7 +919,7 @@ impl DrivingState {
                     let splash = (1.0 - (dist / 7.5).clamp(0.0, 1.0)) * 15.0;
                     let total = (direct + splash).min(38.0);
                     if total > 0.5 {
-                        self.truck.apply_damage(total);
+                        self.truck.apply_damage(total * self.incoming_scale());
                     }
                     self.particles.explosion(pos, 1.15);
                     self.assets.play(&self.assets.explosion_small, 0.70);
@@ -969,7 +991,8 @@ impl DrivingState {
             if tally.fuel > 0 {
                 self.assets.play(&self.assets.pickup_scrap, 0.42);
             }
-            self.upgrades.add_scrap(tally.scrap);
+            let ng_scrap = (tally.scrap as f32 * (1.0 + 0.20 * self.ng_plus as f32)) as u32;
+            self.upgrades.add_scrap(ng_scrap);
             if tally.repair > 0 {
                 self.truck.health = (self.truck.health + tally.repair as f32 * 18.0).min(self.truck.max_health);
             }
@@ -981,6 +1004,13 @@ impl DrivingState {
         // ---------- hull integrity ----------
         if self.truck.health <= 0.0 && !self.wrecked {
             self.wrecked = true;
+            // an 800 m+ run feeds the New Game+ ladder — the wasteland escalates
+            if self.distance_m >= 800.0 {
+                self.save.ng_plus = (self.save.ng_plus + 1).min(NG_PLUS_MAX);
+                self.ng_plus = self.save.ng_plus;
+                self.event_banner = 3.4;
+                self.event_banner_text = "THE WASTELAND ESCALATES — NEW GAME+";
+            }
             // the song dies with the rig
             self.assets.explosion(true);
             self.stop_loops();
@@ -1134,6 +1164,14 @@ impl DrivingState {
             let t = self.banner_timer;
             let alpha = (t / 0.8).min(1.0).min((3.2 - t) / 0.4).clamp(0.0, 1.0);
             ui::draw_biome_banner(biome.name(), alpha);
+        }
+
+        // persistent faction tag under the horizon line
+        {
+            let sw2 = screen_width();
+            let tag = self.faction.name();
+            let d = measure_text(tag, None, 15, 1.0);
+            draw_text(tag, (sw2 - d.width) * 0.5, screen_height() * 0.275, 15.0, self.faction.accent());
         }
 
         if self.event_banner > 0.0 {

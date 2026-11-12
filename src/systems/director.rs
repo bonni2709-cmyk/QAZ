@@ -7,6 +7,7 @@
 use macroquad::prelude::*;
 
 use crate::entities::enemies::{EnemyKind, EnemyPool};
+use crate::systems::factions::Faction;
 use crate::systems::loot::{LootKind, LootPool};
 use crate::world::road::ROAD_HALF;
 
@@ -17,6 +18,9 @@ pub struct Director {
     spawn_timer: f32,
     loot_timer: f32,
     grace: f32,
+    faction: Faction,
+    /// NG+ hull multiplier for spawned hostiles (1.0 = base).
+    hp_scale: f32,
 }
 
 impl Director {
@@ -28,7 +32,19 @@ impl Director {
             spawn_timer: 1.5,
             loot_timer: 5.0,
             grace: GRACE_PERIOD_S,
+            faction: Faction::DustDevils,
+            hp_scale: 1.0,
         }
+    }
+
+    /// Territory driver: faction spawn table follows the biome cycle.
+    pub fn set_faction(&mut self, faction: Faction) {
+        self.faction = faction;
+    }
+
+    /// NG+ pressure: hostile hulls scale with the ladder.
+    pub fn set_hp_scale(&mut self, scale: f32) {
+        self.hp_scale = scale.max(0.5);
     }
 
     fn rand01(&mut self) -> f32 {
@@ -78,15 +94,17 @@ impl Director {
         self.spawn_timer = self.rand_range(2.0, 4.3) / difficulty;
 
         let roll = self.rand01();
+        let (w_biker, w_buggy, _) = self.faction.spawn_weights();
         let kind = if distance_m < 250.0 {
+            // opener: keep it bloodless;bikers and buggies only
             if roll < 0.68 {
                 EnemyKind::Biker
             } else {
                 EnemyKind::Buggy
             }
-        } else if roll < 0.45 {
+        } else if roll < w_biker {
             EnemyKind::Biker
-        } else if roll < 0.74 {
+        } else if roll < w_biker + w_buggy {
             EnemyKind::Buggy
         } else {
             EnemyKind::Armored
@@ -107,7 +125,7 @@ impl Director {
             side * self.rand_range(ROAD_HALF + 1.5, ROAD_HALF + 9.0)
         };
 
-        enemies.spawn(kind, vec3(x, 0.0, z));
+        enemies.spawn(kind, vec3(x, 0.0, z), self.hp_scale);
     }
 
     /// Seed crate clusters on the asphalt/shoulders every 8–13 s.

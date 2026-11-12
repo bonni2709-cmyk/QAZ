@@ -239,7 +239,7 @@ impl EnemyPool {
         lo + self.rand01() * (hi - lo)
     }
 
-    pub fn spawn(&mut self, kind: EnemyKind, pos: Vec3) -> bool {
+    pub fn spawn(&mut self, kind: EnemyKind, pos: Vec3, hp_scale: f32) -> bool {
         let phase = self.rand_range(0.0, std::f32::consts::TAU);
         let fire_cooldown = self.rand_range(0.7, 1.6);
         let rocket_cooldown = self.rand_range(2.2, 3.4);
@@ -251,7 +251,7 @@ impl EnemyPool {
                     pos,
                     yaw: 0.0,
                     speed: kind.top_speed() * 0.55,
-                    hp: kind.max_hp(),
+                    hp: kind.max_hp() * hp_scale,
                     burn_time: 0.0,
                     burn_dps: 0.0,
                     active: true,
