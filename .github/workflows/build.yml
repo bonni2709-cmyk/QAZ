@@ -246,6 +246,7 @@ jobs:
           echo "NDK_HOME=${NDK_HOME}"
           echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
           echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
+          echo "NDK_HOME=${NDK_HOME}" >> "${GITHUB_ENV}"
           echo "ANDROID_NDK_HOME=${NDK_HOME}" >> "${GITHUB_ENV}"
           echo "ANDROID_NDK_ROOT=${NDK_HOME}" >> "${GITHUB_ENV}"
           # quad-apk shells out to plain `cargo build`; give it the same NDK linkers the cross job uses
