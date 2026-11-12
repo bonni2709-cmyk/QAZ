@@ -268,7 +268,18 @@ jobs:
       - name: Build debug APK (signed with default debug keystore)
         env:
           RUST_BACKTRACE: "1"
-        run: cargo quad-apk build --release
+        run: |
+          set -o pipefail
+          cargo quad-apk build --release 2>&1 | tee /tmp/quad-apk.log
+
+      - name: Upload build log (always — CI log endpoint is unreachable from the dev sandbox)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quad-apk-build-log
+          path: /tmp/quad-apk.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
