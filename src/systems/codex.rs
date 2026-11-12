@@ -13,7 +13,7 @@ use crate::systems::savegame::SaveData;
 pub enum Unlock {
     Always,
     Runs(u32),
-    Kills(u32),
+    Kills(u64),
     BestM(f32),
     NgPlus(u32),
 }
@@ -125,3 +125,36 @@ pub fn unlocked_count(save: &SaveData) -> usize {
     ENTRIES.iter().filter(|e| e.unlocked(save)).count()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn save() -> SaveData {
+        SaveData::default()
+    }
+
+    #[test]
+    fn fresh_profile_sees_the_basics_only() {
+        let s = save();
+        let open = unlocked_count(&s);
+        assert!(open >= 4);
+        assert!(ENTRIES.iter().filter(|e| e.unlocked(&s)).all(|e| e.title != "THE CRAWLER"));
+    }
+
+    #[test]
+    fn crawler_entry_opens_at_1800_metres() {
+        let mut s = save();
+        s.best_m = 1799.0;
+        assert!(!ENTRIES.iter().find(|e| e.title == "THE CRAWLER").unwrap().unlocked(&s));
+        s.best_m = 1800.0;
+        assert!(ENTRIES.iter().find(|e| e.title == "THE CRAWLER").unwrap().unlocked(&s));
+    }
+
+    #[test]
+    fn ng_plus_entries_track_the_ladder() {
+        let mut s = save();
+        assert!(!ENTRIES.iter().any(|e| e.title == "NEW GAME+" && e.unlocked(&s)));
+        s.ng_plus = 1;
+        assert!(ENTRIES.iter().find(|e| e.title == "NEW GAME+").unwrap().unlocked(&s));
+    }
+}

@@ -10,6 +10,8 @@
 use macroquad::prelude::*;
 
 use crate::entities::boss::{BossTruck, MinePool};
+use crate::entities::drone::BomberDrone;
+use crate::entities::worm::CrawlerWorm;
 use crate::entities::enemies::{EnemyFrameEvents, EnemyKind, EnemyPool};
 use crate::entities::projectiles::{ProjKind, ProjOwner, ProjectilePool};
 use crate::entities::truck::Truck;
@@ -47,6 +49,10 @@ pub struct DrivingState {
     mines: MinePool,
     next_boss_at: f32,
     boss_contact_cd: f32,
+    worm: Option<CrawlerWorm>,
+    next_worm_at: f32,
+    drone: BomberDrone,
+    next_drone_at: f32,
     event_banner: f32,
     event_banner_text: &'static str,
     was_overheated: bool,
@@ -261,6 +267,10 @@ impl DrivingState {
             mines: MinePool::new(),
             next_boss_at: 1300.0,
             boss_contact_cd: 0.0,
+            worm: None,
+            next_worm_at: 2050.0,
+            drone: BomberDrone::new(),
+            next_drone_at: 1150.0,
             site_z: 430.0 + (mix64(save.total_runs as u64 ^ 0xB411_5EED) % 160) as f32,
             site_seed: mix64(0x5EED_B411 ^ (save.total_runs as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)),
             site_side: if mix64(save.total_runs as u64 ^ 0x5171_E5) & 1 == 0 { -1.0 } else { 1.0 },
@@ -397,6 +407,8 @@ impl DrivingState {
         *self = DrivingState::new(assets);
         self.save = save; // new() reloads from disk anyway; keep counters identical
         self.best_m = self.save.best_m;
+        self.ng_plus = self.save.ng_plus; // survives a failed disk write too
+        self.director.set_hp_scale(1.0 + self.ng_plus as f32 * 0.15);
         self.upgrades = upgrades;
     }
 
@@ -520,6 +532,28 @@ impl DrivingState {
         self.event_banner = 3.0;
         self.event_banner_text = "JUGGERNAUT DOWN";
         self.next_boss_at = self.distance_m + 2600.0;
+    }
+
+    /// THE CRAWLER ruptures: a wet golden silence, a lot of scrap, one less nightmare.
+    fn on_worm_killed(&mut self) {
+        self.assets.explosion(false);
+        let Some(worm) = self.worm.take() else {
+            return;
+        };
+        let pos = worm.pos();
+        self.particles.explosion(pos + vec3(0.0, 0.8, 0.0), 2.4);
+        self.particles.explosion(pos + vec3(0.0, 0.5, 2.1), 1.5);
+        self.camera.add_shake(0.8);
+        for _ in 0..5 {
+            let amount = 7 + (hit_roll(&mut self.hit_rng) * 6.0) as u32;
+            self.loot.spawn_scatter(LootKind::Scrap, pos + vec3(0.0, 0.6, 0.0), amount);
+        }
+        self.loot.spawn(LootKind::Fuel, pos + vec3(0.0, 0.9, 0.0), 0);
+        self.kills += 1;
+        self.kill_timer = 1.0;
+        self.event_banner = 3.0;
+        self.event_banner_text = "THE CRAWLER BURSTS";
+        self.next_worm_at = self.distance_m + 2500.0;
     }
 
     pub fn update(&mut self, dt: f32) {
@@ -737,6 +771,23 @@ impl DrivingState {
             self.event_banner_text = "JUGGERNAUT TANKER AHEAD";
         }
 
+        // the ground mutters: CRAWLER surfaces on its own odometer
+        if self.worm.is_none() && self.distance_m >= self.next_worm_at {
+            self.worm = Some(CrawlerWorm::spawn(self.truck.position.z + 165.0));
+            self.event_banner = 3.0;
+            self.event_banner_text = "SOMETHING BURROWS BENEATH THE ASPHALT";
+        }
+
+        // bomber drone: a klaxon, a shadow, three arguments
+        if !self.drone.is_active() && self.distance_m >= self.next_drone_at {
+            let side = if hit_roll(&mut self.hit_rng) < 0.5 { -1.0 } else { 1.0 };
+            self.drone.spawn(self.truck.position.z + 30.0, side);
+            self.next_drone_at = self.distance_m + 1900.0;
+            self.event_banner = 2.4;
+            self.event_banner_text = "BOMBER DRONE OVERHEAD";
+            self.assets.play(&self.assets.mine_beep, 0.85);
+        }
+
         let band = biome_at(self.truck.position.z).band_index();
         if band != self.biome_band {
             self.biome_band = band;
@@ -821,6 +872,32 @@ impl DrivingState {
             self.camera.add_shake(0.45);
         }
 
+        // THE CRAWLER: ram forward. Contact is the only attack.
+        if let Some(worm) = &mut self.worm {
+            let dmg = worm.update(dt, self.truck.position);
+            if dmg > 0.0 {
+                self.truck.apply_damage(dmg * self.incoming_scale());
+                self.camera.add_shake(0.55);
+                self.assets.play(&self.assets.ram_crash, 0.75);
+            }
+        }
+        // escape valve: it buries itself again and gives up the chase
+        if let Some(worm) = &self.worm {
+            let gap = worm.z() - self.truck.position.z;
+            if gap > 130.0 || gap < -185.0 {
+                self.worm = None;
+                self.next_worm_at = self.distance_m + 2400.0;
+            }
+        }
+
+        // BOMBER DRONE: tick the pass; cook whatever is under it
+        let drone_dmg = self.drone.update(dt, self.truck.position, self.incoming_scale(), &mut self.particles);
+        if drone_dmg > 0.0 {
+            self.truck.apply_damage(drone_dmg);
+            self.camera.add_shake(0.4);
+            self.assets.play(&self.assets.explosion_small, 0.8);
+        }
+
         // burn-damage kills: sweep any enemy whose hull burned through
         for j in 0..self.enemies.count() {
             let dead = self.enemies.get(j).map(|e| e.hp <= 0.0).unwrap_or(false);
@@ -899,6 +976,30 @@ impl DrivingState {
                             }
                         }
                     }
+                    // THE CRAWLER: every body segment is a hit sphere
+                    if !consumed {
+                        if let Some(worm) = &mut self.worm {
+                            for (center, radius) in worm.hit_spheres() {
+                                if !segment_hits_sphere(prev, pos, center, radius) {
+                                    continue;
+                                }
+                                let worm_ammo = match kind {
+                                    ProjKind::Ap => AmmoKind::Ap,
+                                    _ => AmmoKind::Incendiary,
+                                };
+                                let incendiary = kind == ProjKind::Incendiary;
+                                let dealt = turret_damage(worm_ammo, true);
+                                let worm_died = worm.apply_damage(dealt, incendiary);
+                                self.particles.impact(pos, incendiary);
+                                self.hit_timer = 1.0;
+                                if worm_died {
+                                    self.on_worm_killed();
+                                }
+                                consumed = true;
+                                break;
+                            }
+                        }
+                    }
                     if consumed {
                         self.projectiles.deactivate(i);
                     }
@@ -953,7 +1054,7 @@ impl DrivingState {
             }
             match kind {
                 EnemyKind::Biker => {
-                    self.truck.apply_damage(9.0);
+                    self.truck.apply_damage(9.0 * self.incoming_scale());
                     self.particles.explosion(enemy.pos + vec3(0.0, 0.6, 0.0), 0.7);
                     self.enemies.deactivate(j);
                     self.kills += 1;
@@ -961,7 +1062,7 @@ impl DrivingState {
                     self.camera.add_shake(0.26);
                 }
                 EnemyKind::Buggy => {
-                    self.truck.apply_damage(14.0);
+                    self.truck.apply_damage(14.0 * self.incoming_scale());
                     let away = vec2(delta.x, delta.z);
                     let away_len = away.length().max(0.001);
                     let away3 = vec3(away.x / away_len, 0.0, away.y / away_len);
@@ -1104,6 +1205,10 @@ impl DrivingState {
         if let Some(boss) = &mut self.boss {
             boss.draw(ambient, time);
         }
+        if let Some(worm) = &mut self.worm {
+            worm.draw(ambient, time);
+        }
+        self.drone.draw(ambient, time);
         self.mines.draw(time);
         self.loot.draw(ambient, time);
         // magnet beam: hot filaments from the rig to every attracted pickup
@@ -1153,7 +1258,18 @@ impl DrivingState {
             kills: self.kills,
             scrap: self.upgrades.scrap(),
             storm,
-            boss_ratio: self.boss.as_ref().map(|b| b.hp_ratio()).unwrap_or(-1.0),
+            boss_ratio: if let Some(b) = &self.boss {
+                b.hp_ratio()
+            } else if let Some(w) = &self.worm {
+                w.hp_ratio()
+            } else {
+                -1.0
+            },
+            boss_name: if self.worm.is_some() {
+                CrawlerWorm::NAME
+            } else {
+                BossTruck::NAME
+            },
             ammo: self.turret.ammo.label(),
             ammo_short: self.turret.ammo.short(),
             overheated: self.turret.overheated,
