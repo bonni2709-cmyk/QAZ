@@ -332,6 +332,10 @@ jobs:
             tail -n 6 /tmp/quad-apk.log | while IFS= read -r line; do
               printf '::error::TAIL %s\n' "${line}"
             done
+            # emit the lines immediately following a panic header — that is the actual message
+            grep -A3 'panicked at' /tmp/quad-apk.log | head -n 12 | while IFS= read -r line; do
+              printf '::error::PANIC %s\n' "${line}"
+            done
             exit $rc
           fi
 
