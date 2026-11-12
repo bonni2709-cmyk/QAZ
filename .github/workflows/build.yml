@@ -256,8 +256,10 @@ jobs:
           # cargo-quad-apk (crates.io) looks for the pre-r23 legacy names
           # <triple>-ar / <triple>-ld; NDK r23+ renamed them to llvm-ar / ld.
           for TGT in arm-linux-androideabi aarch64-linux-android x86_64-linux-android i686-linux-android; do
-            [ -e "${TOOLBIN}/${TGT}-ar" ] || ln -sfn llvm-ar "${TOOLBIN}/${TGT}-ar" || true
-            [ -e "${TOOLBIN}/${TGT}-ld" ] || ln -sfn ld "${TOOLBIN}/${TGT}-ld" || true
+            for PAIR in ar:llvm-ar ld:ld readelf:llvm-readelf objdump:llvm-objdump objcopy:llvm-objcopy nm:llvm-nm ranlib:llvm-ranlib strip:llvm-strip strings:llvm-strings; do
+              WANT="${PAIR%%:*}"; HAVE="${PAIR##*:}"
+              [ -e "${TOOLBIN}/${TGT}-${WANT}" ] || ln -sfn "${HAVE}" "${TOOLBIN}/${TGT}-${WANT}" || true
+            done
           done
 
           # guarantee `-lunwind` resolves: hand rustc per-target search paths
