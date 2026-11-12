@@ -276,12 +276,13 @@ jobs:
           if [ -d "${LLVM_ROOT}/lib64/clang" ] && [ ! -e "${LLVM_ROOT}/lib" ]; then
             ln -sfn lib64 "${LLVM_ROOT}/lib" || sudo ln -sfn lib64 "${LLVM_ROOT}/lib" || true
           fi
-          echo "---- libunwind/libgcc inventory across NDKs ----"
-          for NDKDIR in "${NDK_ROOT}"/*/toolchains/llvm/prebuilt/linux-x86_64; do
-            echo "NDKDIR ${NDKDIR}"
-            find "${NDKDIR}" \( -name 'libunwind.a' -o -name 'libgcc.a' \) 2>/dev/null | head -10 | sed 's/^/    /'
+          # annotated inventory — the only channel readable from the dev sandbox
+          for V in 27.3.13750724 29.0.14206865 30.0.16248370; do
+            LR="${NDK_ROOT}/${V}/toolchains/llvm/prebuilt/linux-x86_64"
+            F=$(find "${LR}" \( -name 'libunwind*' -o -name 'libgcc.a' \) 2>/dev/null | sed "s|${LR}/||g" | sort | paste -sd' ' -)
+            ARCH=$(ls "${LR}" 2>/dev/null | paste -sd, -)
+            printf '::warning::inv-%s top={%s} fs={%s}\n' "${V}" "${ARCH}" "${F}"
           done
-          printf '::warning::unwind inventory printed in the plain log\n' 
 
           for TGT in arm-linux-androideabi aarch64-linux-android x86_64-linux-android i686-linux-android; do
             if [ ! -e "${TOOLBIN}/${TGT}-ar" ] && [ -e "${TOOLBIN}/llvm-ar" ]; then
