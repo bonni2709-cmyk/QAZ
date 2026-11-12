@@ -31,7 +31,7 @@ on foot to scavenge ruins while marauders circle the rig.
 | 5 | Heavy assets: 4K textures, WAV audio, 5-min track, multi-arch CI polish | **DONE — this branch (procedural build-time pack)** |
 | 6 | UI/menus, JSON saves, APK packaging, icon | **DONE — this branch** |
 | 7 | On-foot scavenging: ruin sites, NERVE, marauder skiffs, safes, tool minis (angle grinder / screwdriver) | **DONE — this branch** |
-| 8 | Factions, global bosses (crawler worm, bomber drones), New Game+, Codex | planned |
+| 8 | Factions, global bosses (crawler worm, bomber drones), New Game+, Codex | **DONE — this branch** |
 
 ## Module 1 — what's inside
 
@@ -191,8 +191,8 @@ on foot to scavenge ruins while marauders circle the rig.
   WRECKED now hints `R — ROLL OUT AGAIN · M — MAIN MENU`. Pause footer
   updated to Module 6.
 - **APK packaging**: `android_res/mipmap-*/ic_launcher.png` (five densities,
-  wired via `res` + `icon = "@mipmap/ic_launcher"` in `Cargo.toml`;
-  `version_code` 6, `version_name` `0.1.0-module6`). The launcher icon is a
+  wired via `res` + `icon = "@mipmap/ic_launcher"` in `Cargo.toml`; current
+  `version_code` 8, `version_name` `0.1.0-module8`). The launcher icon is a
   **procedural placeholder** (`tools/gen_icon.py` — geometric war-rig front,
   no text) — honest, installable, replaceable by artist masters. The manual
   `apk` CI job builds the APK; the generated asset pack ships inside it.
@@ -215,6 +215,47 @@ on foot to scavenge ruins while marauders circle the rig.
 | `F` (hold) — bail out at a RUIN SITE | hold on-screen **BAIL** button |
 | On foot: `WASD` move · mouse look · `LMB/Space` work · `1`/`2` tools · `E` grab / exfil | auto-walk + screen thirds · **WORK** button holds tools/exfil · tap = grab |
 | hold `Space` / click on loading = fast-forward | tap & hold anywhere |
+
+## Module 8 — what's inside
+
+- **Factions** (`systems/factions.rs`): the highway is not neutral ground.
+  Two crews hold it — **DUST DEVILS** in the open badlands (rust-orange,
+  0.58 bike / 0.32 buggy / 0.10 armored) and **ASH CARTEL** in the Ruined
+  City (ash-grey, 0.22 / 0.33 / 0.45 — armored doctrine). Territory follows
+  the biome cycle; on a band break the rig announces it
+  (`DUST DEVILS TERRITORY` / `ASH CARTEL TERRITORY`) and a persistent tag
+  sits under the HUD horizon. The director's spawn table and the HUD bar are
+  territory-aware.
+- **Boss #2 — THE CRAWLER** (`entities/worm.rs`): a burrowing six-segment
+  horror on its own odometer (first surface at 2,050 m, then every ~2,500 m,
+  2400 m cooldown). Head steers at 1.9 rad/s with a range-banded rubber band;
+  the spine chain-follows at fixed 2.35 m spacing. Contact with *any*
+  segment is 16 hull (1.1 s CD). AP ×0.8 — psionic chitin; incendiary ×1.5 —
+  flesh burns. Escape valve: outrun it (>130 m ahead) and it buries itself.
+  Pellets seeded from the same hit-test as everything else; kills drop
+  salvage and a fuel canister. HUD bar reads JUGGERNAUT / CRAWLER by name.
+- **BOMBER DRONE** (`entities/drone.rs`): a one-pass set-piece every ~1,900 m
+  (first at 1,150 m). A klaxon, then a maintenance-murder quad sweeps the
+  road at 30 m, dropping three dumb bombs while over the lanes. Each bomb is
+  telegraphed by a pulsing amber blast decal; direct/splash damage scales
+  with distance to impact. It cannot be shot down — the counter is not being
+  there when it arrives.
+- **New Game+** (save schema v2): `railgun_pursuit_save.json` is now version 2
+  with an `ng_plus` ladder (max 9). Any 800 m+ crash feeds the ladder
+  ("THE WASTELAND ESCALATES — NEW GAME+"): hostile hulls +15%/rank, incoming
+  damage +15%/rank, scrap +20%/rank. v1 saves **migrate forward** instead of
+  being discarded as corrupt. All clamping lives in one `clamp_data` path
+  shared by v1 and v2; unit tests cover roundtrip, migration, clamps and the
+  stable on-disk key list.
+- **FIELD CODEX** (`systems/codex.rs`, `[C]` on the menu): the handbook you
+  were never given. Nine entries — the highway, both factions, JUGGERNAUT,
+  THE CRAWLER, the BOMBER DRONE, RUIN SITES, NEW GAME+, the work bench —
+  each unlocking off the career in the save file (best distance / kills /
+  runs / NG+ rank). Locked pages print as `▮▮▮▮▮ CLASSIFIED`. Unit-tested.
+- **APK still pending** — the manual `apk` job remains undispatched (the
+  integration token gets HTTP 403 on `workflow_dispatch`). Run it once from
+  the Actions tab to mint the first APK artifact; everything up to the APK
+  boundary is CI-green on all three ABIs.
 
 ## Build & run
 

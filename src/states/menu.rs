@@ -7,6 +7,7 @@
 use macroquad::prelude::*;
 
 use crate::entities::truck::Truck;
+use crate::systems::codex::{self, ENTRIES};
 use crate::systems::savegame::{self, SaveData};
 
 pub struct MenuState {
@@ -15,6 +16,7 @@ pub struct MenuState {
     elapsed: f32,
     fade_in: f32,
     save: SaveData,
+    codex_open: bool,
 }
 
 impl MenuState {
@@ -25,6 +27,7 @@ impl MenuState {
             elapsed: 0.0,
             fade_in: 1.0,
             save: savegame::load(),
+            codex_open: false,
         }
     }
 
@@ -33,6 +36,26 @@ impl MenuState {
         self.elapsed += dt;
         self.orbit += dt * 0.55;
         self.fade_in = (self.fade_in - dt * 1.8).max(0.0);
+
+        if is_key_pressed(KeyCode::C) {
+            self.codex_open = !self.codex_open;
+        }
+        let escape = {
+            #[cfg(target_os = "android")]
+            {
+                is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back)
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                is_key_pressed(KeyCode::Escape)
+            }
+        };
+        if escape && self.codex_open {
+            self.codex_open = false;
+        }
+        if self.codex_open {
+            return false;
+        }
 
         let start = is_key_pressed(KeyCode::Enter)
             || is_key_pressed(KeyCode::Space)
@@ -135,12 +158,15 @@ impl MenuState {
 
         // ---------- service record (straight off the JSON save) ----------
         let stats_y = sh * 0.845;
-        let stats = [
+        let mut stats = vec![
             format!("BEST   {:.0} m", self.save.best_m),
             format!("SCRAP  {}", self.save.scrap),
             format!("RUNS   {}", self.save.total_runs),
             format!("KILLS  {}", self.save.total_kills),
         ];
+        if self.save.ng_plus > 0 {
+            stats.push(format!("NG+  ◉{}", self.save.ng_plus));
+        }
         let cell_w = (sw * 0.9).min(720.0) / stats.len() as f32;
         let start_x = (sw - cell_w * stats.len() as f32) * 0.5;
         for (i, stat) in stats.iter().enumerate() {
@@ -158,7 +184,7 @@ impl MenuState {
             14.0,
             Color::new(0.42, 0.40, 0.33, 0.85),
         );
-        let right = "v0.1.0 · MODULE 6";
+        let right = "v0.1.0 · MODULE 8";
         let right_dim = measure_text(right, None, 14, 1.0);
         draw_text(
             right,
@@ -167,6 +193,53 @@ impl MenuState {
             14.0,
             Color::new(0.42, 0.40, 0.33, 0.85),
         );
+
+        // ---------- codex hint ----------
+        let hint = "[C]  FIELD CODEX";
+        draw_text(hint, 14.0, sh * 0.68, 17.0, Color::new(0.55, 0.52, 0.42, 0.75));
+
+        // ---------- codex overlay ----------
+        if self.codex_open {
+            draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.05, 0.048, 0.045, 0.88));
+            let panel_w = (sw * 0.82).min(880.0);
+            let px = (sw - panel_w) * 0.5;
+            let py = sh * 0.055;
+            let ph = sh * 0.83;
+            draw_rectangle(px - 2.0, py - 2.0, panel_w + 4.0, ph + 4.0, Color::new(0.95, 0.55, 0.14, 0.55));
+            draw_rectangle(px, py, panel_w, ph, Color::new(0.09, 0.087, 0.082, 0.97));
+
+            let unlocked = codex::unlocked_count(&self.save);
+            let header = format!("FIELD CODEX   {} / {}", unlocked, ENTRIES.len());
+            let hd = measure_text(&header, None, 30, 1.0);
+            draw_text(&header, px + (panel_w - hd.width) * 0.5, py + 46.0, 30.0, Color::new(0.95, 0.72, 0.28, 1.0));
+
+            let mut col_x = px + 30.0;
+            let mut y = py + 92.0;
+            let line_h = 20.0f32;
+            let body_size = 15.0f32;
+            for entry in ENTRIES {
+                if y > py + ph - 30.0 {
+                    col_x = px + panel_w * 0.5 + 22.0;
+                    y = py + 92.0;
+                }
+                if entry.unlocked(&self.save) {
+                    draw_text(entry.title, col_x, y, 19.0, Color::new(0.94, 0.82, 0.45, 1.0));
+                    y += 22.0;
+                    for line in entry.body {
+                        draw_text(line, col_x + 12.0, y, body_size, Color::new(0.78, 0.75, 0.66, 0.95));
+                        y += line_h;
+                    }
+                    y += 16.0;
+                } else {
+                    draw_text("▮▮▮▮▮  CLASSIFIED", col_x, y, 17.0, Color::new(0.38, 0.36, 0.30, 0.8));
+                    y += 22.0 + line_h * 2.0 + 16.0;
+                }
+            }
+
+            let foot = "[C] / [ESC] / TAP-OUT — BACK TO THE RIG";
+            let fd = measure_text(foot, None, 14, 1.0);
+            draw_text(foot, px + (panel_w - fd.width) * 0.5, py + ph - 12.0, 14.0, Color::new(0.5, 0.48, 0.4, 0.85));
+        }
 
         // hard fade from black on entry
         if self.fade_in > 0.0 {
