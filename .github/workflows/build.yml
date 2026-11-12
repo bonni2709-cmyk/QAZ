@@ -313,6 +313,26 @@ jobs:
             fi
           done
 
+          # guarantee `-lunwind` resolves: hand rustc per-target search paths so the
+          # bare `<triple>-ld` link can find the NDK's clang resource libunwind.a
+          CLANG_LINUX_DIR=$(ls -d "${NDK_HOME}"/toolchains/llvm/prebuilt/linux-x86_64/lib*/clang/*/lib/linux 2>/dev/null | head -1)
+          if [ -n "${CLANG_LINUX_DIR}" ]; then
+            for ARCH in aarch64 x86_64 arm i386; do
+              D="${CLANG_LINUX_DIR}/${ARCH}"
+              if [ -f "${D}/libunwind.a" ]; then
+                U=$(printf '%s' "${ARCH}" | tr '[:lower:]' '[:upper:]')
+                case "${ARCH}" in
+                  aarch64) TR="AARCH64_LINUX_ANDROID" ;;
+                  x86_64)  TR="X86_64_LINUX_ANDROID" ;;
+                  arm)     TR="ARMV7_LINUX_ANDROIDEABI" ;;
+                  i386)    TR="I686_LINUX_ANDROID" ;;
+                esac
+                echo "CARGO_TARGET_${TR}_RUSTFLAGS=-L ${D}"
+                echo "CARGO_TARGET_${TR}_RUSTFLAGS=-L ${D}" >> "$GITHUB_ENV"
+              fi
+            done
+          fi
+
           echo "SDK_ROOT=${SDK_ROOT}"
           # visibility for headless debugging (annotations are the only channel we can read):
           PLATFORMS="$(ls "${SDK_ROOT}/platforms" 2>/dev/null | paste -sd, -)"
