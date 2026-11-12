@@ -231,12 +231,43 @@ jobs:
         with:
           key: apk
 
+      - name: Locate Android SDK & NDK (same discovery the cross-compile job uses)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          NDK_HOME="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
+          if [ -z "${NDK_HOME}" ]; then
+            NDK_ROOT="${SDK_ROOT}/ndk"
+            NDK_HOME="${NDK_ROOT}/$(ls "${NDK_ROOT}" | sort -V | tail -1)"
+          fi
+          test -d "${NDK_HOME}"
+          echo "SDK_ROOT=${SDK_ROOT}"
+          echo "NDK_HOME=${NDK_HOME}"
+          echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_HOME=${NDK_HOME}" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_ROOT=${NDK_HOME}" >> "${GITHUB_ENV}"
+          # quad-apk shells out to plain `cargo build`; give it the same NDK linkers the cross job uses
+          case_linker() {
+            case "$1" in
+              aarch64-linux-android)   echo aarch64-linux-android26-clang ;;
+              armv7-linux-androideabi) echo armv7a-linux-androideabi26-clang ;;
+              x86_64-linux-android)    echo x86_64-linux-android26-clang ;;
+            esac
+          }
+          for T in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
+            LINKER="${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/$(case_linker "${T}")"
+            ENV_NAME="CARGO_TARGET_$(echo "${T}" | tr 'a-z-' 'A-Z_')_LINKER"
+            echo "${ENV_NAME}=${LINKER}" >> "${GITHUB_ENV}"
+          done
+
       - name: Install cargo-quad-apk
         run: cargo install cargo-quad-apk --locked
 
       - name: Build debug APK (signed with default debug keystore)
         env:
-          ANDROID_HOME: /usr/local/lib/android/sdk
+          RUST_BACKTRACE: "1"
         run: cargo quad-apk build --release
 
       - name: Upload APK
