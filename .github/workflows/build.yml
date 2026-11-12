@@ -191,7 +191,7 @@ jobs:
   apk:
     name: apk (manual, cargo-quad-apk)
     needs: [desktop-check, android]
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'  # TEMP: push so the APK can be minted headlessly; restore workflow_dispatch-only afterwards
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
