@@ -314,7 +314,10 @@ jobs:
           test -f "${ANDROID_SDK_ROOT}/platforms/android-29/android.jar" && echo "android-29 OK"
 
       - name: Install cargo-quad-apk
-        run: cargo install cargo-quad-apk --locked
+        # crates.io cargo-quad-apk 0.1.4 is the pre-2025 codebase: it needs a Java 8
+        # rt.jar (gone from modern JDKs) and -source 1.7. Pin the maintained master
+        # instead (aapt2, d8 --no-desugaring, -bootclasspath android.jar, JDK 11+).
+        run: cargo install --git https://github.com/not-fl3/cargo-quad-apk --rev d411c8fe1c08339e46d7dc6b40ac04ea5e3a01b6 cargo-quad-apk
 
       - name: Build debug APK (signed with default debug keystore)
         env:
